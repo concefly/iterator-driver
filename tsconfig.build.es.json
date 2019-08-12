@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "esNext",
+    "target": "es5",
+    "sourceMap": false,
+    "declaration": true
+  },
+  "include": ["src"]
+}
