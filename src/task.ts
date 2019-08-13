@@ -1,17 +1,25 @@
-import { ITask } from './interface';
+export class BaseTask<T> {
+  iter: IterableIterator<T> = null;
+}
 
-export const createTask = <T>(iter: IterableIterator<T>): ITask<T> => {
-  return { iter };
-};
+export class SingleTask<T> extends BaseTask<T> {
+  constructor(readonly iter: IterableIterator<T>) {
+    super();
+  }
+}
 
-export const createSerialTask = <T>(iters: IterableIterator<T>[]): ITask<T> => {
-  const serialIter = (function*() {
-    for (const iter of iters) {
-      for (const _ of iter) {
-        yield _;
+export class SerialTask<T> extends BaseTask<T> {
+  constructor(private readonly iters: IterableIterator<T>[]) {
+    super();
+
+    const self = this;
+
+    this.iter = (function*() {
+      for (const iter of self.iters) {
+        for (const _ of iter) {
+          yield _;
+        }
       }
-    }
-  })();
-
-  return { iter: serialIter };
-};
+    })();
+  }
+}

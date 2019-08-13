@@ -1,32 +1,55 @@
-import { IScheduler, IDriver, ITask } from './interface';
-import { createEventBus } from './event';
+import { EventBus, BaseEvent } from './event';
+import { BaseTask } from './task';
+import { BaseScheduler } from './scheduler';
+
+export const EVENT = {
+  Start: class extends BaseEvent {},
+  Done: class extends BaseEvent {},
+  Cancel: class extends BaseEvent {},
+};
 
 /** 创建切片任务驱动器 */
-export const createTaskDriver = <T>(
-  task: ITask<T>,
-  scheduler: IScheduler,
-  callback: (value: T) => void
-): IDriver => {
-  const eventBus = createEventBus();
-  let removeHandler: ReturnType<IScheduler>;
+export class TaskDriver<T> {
+  private eventBus = new EventBus();
+  private removeHandler: Function;
 
-  const { iter } = task;
+  constructor(
+    private readonly task: BaseTask<T>,
+    private readonly scheduler: BaseScheduler,
+    private readonly callback: (value: T) => void
+  ) {}
 
-  const _runNext = () => {
-    const { value, done } = iter.next();
+  private runNext = () => {
+    const { value, done } = this.task.iter.next();
+
     if (done) {
-      eventBus.emit('done');
+      this.eventBus.emit(new EVENT.Done());
       return;
     }
 
-    callback(value);
-    removeHandler = scheduler(_runNext);
+    this.callback(value);
+    this.removeHandler = this.scheduler.schedule(this.runNext);
   };
 
-  return {
-    start: () => _runNext(),
-    cancel: () => removeHandler && removeHandler(),
-    on: (e: string, handler: Function) => eventBus.on(e, handler),
-    off: (e: string, handler: Function) => eventBus.off(e, handler),
-  };
-};
+  start() {
+    this.eventBus.emit(new EVENT.Start());
+    this.runNext();
+    return this;
+  }
+
+  cancel() {
+    this.removeHandler && this.removeHandler();
+    this.eventBus.emit(new EVENT.Cancel());
+    return this;
+  }
+
+  on(type: typeof BaseEvent, h: (event: BaseEvent) => void) {
+    this.eventBus.on(type, h);
+    return this;
+  }
+
+  off(type: typeof BaseEvent, h: Function) {
+    this.eventBus.off(type, h);
+    return this;
+  }
+}

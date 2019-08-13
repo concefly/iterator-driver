@@ -1,25 +1,22 @@
-import { IEventBus } from './interface';
+export class BaseEvent {}
 
-export const createEventBus = (): IEventBus => {
-  const handleMap = new Map<string, Function[]>();
+export class EventBus {
+  private handleMap = new Map<BaseEvent, Function[]>();
 
-  const bus: IEventBus = { on, off, emit };
+  emit<T extends BaseEvent>(event: T) {
+    const handlers = this.handleMap.get(event.constructor) || [];
+    handlers.forEach(h => h(event));
 
-  function on(e: string, fn: Function) {
-    handleMap.set(e, [...(handleMap.get(e) || []), fn]);
-    return bus;
+    return this;
   }
 
-  function off(e: string, fn: Function) {
-    handleMap.set(e, [...(handleMap.get(e) || [])].filter(_fn => _fn !== fn));
-    return bus;
+  on<T extends typeof BaseEvent>(type: T, handler: (event: InstanceType<T>) => void) {
+    this.handleMap.set(type, [...(this.handleMap.get(type) || []), handler]);
+    return this;
   }
 
-  function emit(e: string, ...data: any[]) {
-    const handlers = handleMap.get(e) || [];
-    handlers.forEach(fn => fn(...data));
-    return bus;
+  off<T extends typeof BaseEvent>(type: T, handler: Function) {
+    this.handleMap.set(type, [...(this.handleMap.get(type) || [])].filter(_h => _h !== handler));
+    return this;
   }
-
-  return bus;
-};
+}

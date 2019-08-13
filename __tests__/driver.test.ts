@@ -1,17 +1,22 @@
-import { createTaskDriver, createTask, syncScheduler, createSerialTask } from '../src';
+import { SingleTask, TaskDriver, BaseScheduler, EVENT, SerialTask } from '../src';
 
 describe('__tests__/driver.test.ts', () => {
   it('单任务', done => {
     const i1 = (function*() {
       yield 'x';
     })();
-    const t1 = createTask(i1);
+    const t1 = new SingleTask(i1);
 
-    const d = createTaskDriver(t1, syncScheduler, value => {
+    const d = new TaskDriver(t1, new BaseScheduler(), value => {
       expect(value).toBe('x');
     });
 
-    d.on('done', () => {
+    let startFlag = 0;
+
+    d.on(EVENT.Start, () => {
+      startFlag++;
+    }).on(EVENT.Done, () => {
+      expect(startFlag).toBe(1);
       done();
     });
 
@@ -26,15 +31,15 @@ describe('__tests__/driver.test.ts', () => {
       yield 'i2';
     })();
 
-    const t1 = createSerialTask([i1, i2]);
+    const t1 = new SerialTask([i1, i2]);
 
     let cnt = 0;
-    const d = createTaskDriver(t1, syncScheduler, value => {
+    const d = new TaskDriver(t1, new BaseScheduler(), value => {
       cnt++;
       expect(value).toBe(`i${cnt}`);
     });
 
-    d.on('done', () => {
+    d.on(EVENT.Done, () => {
       done();
     });
 
