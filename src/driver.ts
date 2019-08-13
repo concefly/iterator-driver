@@ -48,7 +48,7 @@ export class TaskDriver<T> {
     return this;
   }
 
-  off(type: typeof BaseEvent, h: Function) {
+  off(type?: typeof BaseEvent, h?: Function) {
     this.eventBus.off(type, h);
     return this;
   }

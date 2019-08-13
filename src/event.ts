@@ -15,8 +15,21 @@ export class EventBus {
     return this;
   }
 
-  off<T extends typeof BaseEvent>(type: T, handler: Function) {
-    this.handleMap.set(type, [...(this.handleMap.get(type) || [])].filter(_h => _h !== handler));
+  off<T extends typeof BaseEvent>(type?: T, handler?: Function) {
+    // 卸载指定 handler
+    if (type && handler) {
+      this.handleMap.set(type, [...(this.handleMap.get(type) || [])].filter(_h => _h !== handler));
+      return this;
+    }
+
+    // 卸载指定 type 的 handler
+    if (type) {
+      this.handleMap.delete(type);
+      return this;
+    }
+
+    // 卸载所有
+    this.handleMap.clear();
     return this;
   }
 }
