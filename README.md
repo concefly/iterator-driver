@@ -1,15 +1,8 @@
 <h1 align="center">iterator-driver</h1>
-<p>
-  <a href="https://github.com/concefly/iterator-driver#readme">
-    <img alt="Documentation" src="https://img.shields.io/badge/documentation-yes-brightgreen.svg" target="_blank" />
-  </a>
-  <a href="https://github.com/concefly/iterator-driver/graphs/commit-activity">
-    <img alt="Maintenance" src="https://img.shields.io/badge/Maintained%3F-yes-green.svg" target="_blank" />
-  </a>
-  <a href="https://github.com/concefly/iterator-driver/blob/master/LICENSE">
-    <img alt="License: ISC" src="https://img.shields.io/badge/License-ISC-yellow.svg" target="_blank" />
-  </a>
-</p>
+
+![npm bundle size](https://img.shields.io/bundlephobia/min/iterator-driver)
+![npm (tag)](https://img.shields.io/npm/v/iterator-driver/latest)
+![npm](https://img.shields.io/npm/dw/iterator-driver)
 
 ### 🏠 [Homepage](https://github.com/concefly/iterator-driver#readme)
 
@@ -20,19 +13,28 @@ Tiny 迭代器驱动
 TL; DR
 
 ```js
-import { createTaskDriver, createTask, idleScheduler } from 'iterator-driver';
+import { SingleTask, TaskDriver, IdleScheduler, EVENT, SerialTask } from 'iterator-driver';
 
 const i1 = (function*() {
   yield 'x';
 })();
-const t1 = createTask(i1);
 
-const driver = createTaskDriver(t1, idleScheduler, value => {
+const t1 = new SingleTask(i1);
+
+const driver = new TaskDriver(t1, new IdleScheduler(), value => {
   console.log(value); // print 'x'
 });
 
-driver.on('done', () => {
+driver.on(EVENT.Start, () => {
+  console.log('It is start!')
+});
+
+driver.on(EVENT.Done, () => {
   console.log('It is done!')
+});
+
+driver.on(EVENT.Cancel, () => {
+  console.log('It is cancel!')
 });
 
 driver.start();
