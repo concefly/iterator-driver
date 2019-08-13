@@ -2,9 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "commonjs",
-    "target": "es5",
-    "sourceMap": false,
-    "declaration": true
+    "sourceMap": false
   },
   "include": ["src"]
 }

@@ -2,7 +2,7 @@
   "compilerOptions": {
     "esModuleInterop": true,
     "target": "es2015",
-    "module": "ESNext",
+    "module": "commonjs",
     "moduleResolution": "node",
     "sourceMap": true,
     "jsx": "react",
@@ -10,7 +10,9 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "noUnusedLocals": true,
+    "declaration": true,
     "downlevelIteration": true,
     "lib": ["es5", "es2015", "dom"]
-  }
+  },
+  "exclude": ["dist"]
 }
