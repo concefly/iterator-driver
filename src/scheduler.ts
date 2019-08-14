@@ -1,7 +1,17 @@
 export class BaseScheduler {
   schedule(callback: () => void): () => void {
-    callback();
+    void callback;
     return () => {};
+  }
+}
+
+export class TimeoutScheduler extends BaseScheduler {
+  schedule(callback: () => void): () => void {
+    const tid = setTimeout(() => callback(), 0);
+
+    return () => {
+      clearTimeout(tid);
+    };
   }
 }
 
