@@ -50,6 +50,15 @@ export class TaskDriver<T> {
     });
   }
 
+  private resetState() {
+    this.taskQueue.forEach(task => {
+      task.iter.return();
+      this.taskRuntimeInfo.delete(task);
+    });
+    this.taskQueue = [];
+    this.cancelSchedule = null;
+  }
+
   private runNextSlice = () => {
     // 任务队列空 -> 结束当前 slice
     if (this.taskQueue.length === 0) {
@@ -88,7 +97,7 @@ export class TaskDriver<T> {
 
   cancel() {
     this.cancelSchedule && this.cancelSchedule();
-    this.taskQueue.forEach(task => task.iter.return());
+    this.resetState();
     this.eventBus.emit(new EVENT.Cancel());
     return this;
   }
