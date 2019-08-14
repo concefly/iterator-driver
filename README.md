@@ -40,6 +40,14 @@ driver.on(EVENT.Cancel, () => {
 driver.start();
 ```
 
+### 设置任务优先级
+
+```js
+const t1 = new SingleTask(i1, 10);
+// or
+t1.priority = 20
+```
+
 ## Install
 
 ```sh
