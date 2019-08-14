@@ -98,6 +98,39 @@ describe('__tests__/driver.test.ts', () => {
         cnt === 2 && expect(value).toBe(`i1.1`);
         cnt === 3 && expect(value).toBe(`i1.2`);
         cnt === 4 && expect(value).toBe(`i2.2`);
+        if (cnt === 5) throw new Error();
+      });
+
+      d.on(EVENT.Done, () => {
+        done();
+      });
+
+      d.start();
+    });
+
+    it('动态 priority', done => {
+      const i1 = (function*() {
+        yield 'i1.1';
+        yield 'i1.2';
+      })();
+      const i2 = (function*() {
+        yield 'i2.1';
+        yield 'i2.2';
+      })();
+
+      const t1 = new SingleTask(i1);
+      const t2 = new SingleTask(i2, 1);
+
+      let cnt = 0;
+      const d = new TaskDriver([t1, t2], new TimeoutScheduler(), value => {
+        cnt++;
+
+        if (cnt === 1) t1.priority = 2;
+
+        cnt === 1 && expect(value).toBe('i2.1');
+        cnt === 2 && expect(value).toBe('i1.1');
+        cnt === 3 && expect(value).toBe('i1.2');
+        cnt === 4 && expect(value).toBe('i2.2');
       });
 
       d.on(EVENT.Done, () => {

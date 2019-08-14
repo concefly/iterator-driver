@@ -4,13 +4,13 @@ export class BaseTask<T> {
 }
 
 export class SingleTask<T> extends BaseTask<T> {
-  constructor(readonly iter: IterableIterator<T>, readonly priority: number = 0) {
+  constructor(readonly iter: IterableIterator<T>, public priority: number = 0) {
     super();
   }
 }
 
 export class SerialTask<T> extends BaseTask<T> {
-  constructor(private readonly iters: IterableIterator<T>[], readonly priority: number = 0) {
+  constructor(private readonly iters: IterableIterator<T>[], public priority: number = 0) {
     super();
 
     const self = this;
