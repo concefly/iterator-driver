@@ -22,7 +22,7 @@ export class TaskDriver<T> {
   >();
 
   private eventBus = new EventBus();
-  private removeHandler: Function;
+  private cancelSchedule: Function;
 
   constructor(
     task: BaseTask<T>[] | BaseTask<T>,
@@ -77,7 +77,7 @@ export class TaskDriver<T> {
     }
 
     // 调度下一个
-    this.removeHandler = this.scheduler.schedule(this.runNextSlice);
+    this.cancelSchedule = this.scheduler.schedule(this.runNextSlice);
   };
 
   start() {
@@ -87,7 +87,8 @@ export class TaskDriver<T> {
   }
 
   cancel() {
-    this.removeHandler && this.removeHandler();
+    this.cancelSchedule && this.cancelSchedule();
+    this.taskQueue.forEach(task => task.iter.return());
     this.eventBus.emit(new EVENT.Cancel());
     return this;
   }
