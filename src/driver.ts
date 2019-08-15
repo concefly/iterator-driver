@@ -8,21 +8,21 @@ export const EVENT = {
   Start: class extends BaseEvent {},
 
   /** 每个 yield 事件 */
-  Call: class<T> extends BaseEvent {
+  Yield: class<T> extends BaseEvent {
     constructor(public value: T) {
       super();
     }
   },
 
   /** 某个 iterator 结束 */
-  DoneOne: class<T> extends BaseEvent {
+  Done: class<T> extends BaseEvent {
     constructor(public error: Error, public value: T) {
       super();
     }
   },
 
   /** 所有 iterator 结束 */
-  Done: class extends BaseEvent {},
+  Empty: class extends BaseEvent {},
 
   /** 取消 */
   Cancel: class extends BaseEvent {},
@@ -94,7 +94,7 @@ export class TaskDriver<T> {
   private runNextSlice = () => {
     // 任务队列空 -> 结束当前 slice
     if (this.taskQueue.length === 0) {
-      this.eventBus.emit(new EVENT.Done());
+      this.eventBus.emit(new EVENT.Empty());
       return;
     }
 
@@ -113,13 +113,13 @@ export class TaskDriver<T> {
         this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
 
         if (done) {
-          this.eventBus.emit(new EVENT.DoneOne(null, resolvedValue));
+          this.eventBus.emit(new EVENT.Done(null, resolvedValue));
         } else {
           // 未结束的任务要重新入队列
           this.taskQueue.unshift(task);
 
           this.callback && this.callback(resolvedValue);
-          this.eventBus.emit(new EVENT.Call(resolvedValue));
+          this.eventBus.emit(new EVENT.Yield(resolvedValue));
         }
 
         // 调度下一个
@@ -127,7 +127,7 @@ export class TaskDriver<T> {
       })
       .catch(e => {
         task.iter.throw(e);
-        this.eventBus.emit(new EVENT.DoneOne(e, undefined));
+        this.eventBus.emit(new EVENT.Done(e, undefined));
 
         // 调度下一个
         this.cancelSchedule = this.scheduler.schedule(this.runNextSlice);
@@ -152,12 +152,12 @@ export class TaskDriver<T> {
     return this;
   }
 
-  on(type: typeof BaseEvent, h: (event: BaseEvent) => void) {
+  on<T extends typeof BaseEvent>(type: T, h: (event: InstanceType<T>) => void) {
     this.eventBus.on(type, h);
     return this;
   }
 
-  off(type?: typeof BaseEvent, h?: Function) {
+  off<T extends typeof BaseEvent>(type?: T, h?: Function) {
     this.eventBus.off(type, h);
     return this;
   }

@@ -15,12 +15,55 @@ describe('__tests__/driver.test.ts', () => {
 
     d.on(EVENT.Start, () => {
       startFlag++;
-    }).on(EVENT.Done, () => {
+    }).on(EVENT.Empty, () => {
       expect(startFlag).toBe(1);
       done();
     });
 
     d.start();
+  });
+
+  it('事件流', done => {
+    const i1 = (function*() {
+      yield '1.1';
+      yield '1.2';
+      return '1.3';
+    })();
+    const i2 = (function*() {
+      yield '2.1';
+      yield '2.2';
+      return '2.3';
+    })();
+    const t1 = new SingleTask(i1, 2);
+    const t2 = new SingleTask(i2, 1);
+
+    const d = new TaskDriver([t1, t2], new TimeoutScheduler());
+
+    let cnt = 0;
+
+    d.on(EVENT.Start, () => {
+      cnt++;
+      expect(cnt).toEqual(1);
+    })
+      .on(EVENT.Yield, e => {
+        cnt++;
+        cnt === 2 && expect(e.value).toEqual('1.1');
+        cnt === 3 && expect(e.value).toEqual('1.2');
+        cnt === 5 && expect(e.value).toEqual('2.1');
+        cnt === 6 && expect(e.value).toEqual('2.2');
+      })
+      .on(EVENT.Done, e => {
+        cnt++;
+        cnt === 4 && expect(e.value).toEqual('1.3');
+        cnt === 7 && expect(e.value).toEqual('2.3');
+        expect(e.error).toBeNull();
+      })
+      .on(EVENT.Empty, () => {
+        cnt++;
+        expect(cnt).toEqual(8);
+        done();
+      })
+      .start();
   });
 
   it('多串行任务', done => {
@@ -39,7 +82,7 @@ describe('__tests__/driver.test.ts', () => {
       expect(value).toBe(`i${cnt}`);
     });
 
-    d.on(EVENT.Done, () => {
+    d.on(EVENT.Empty, () => {
       done();
     });
 
@@ -68,7 +111,7 @@ describe('__tests__/driver.test.ts', () => {
       cnt === 6 && expect(value).toEqual({ c: 'c' });
     });
 
-    d.on(EVENT.Done, () => done()).start();
+    d.on(EVENT.Empty, () => done()).start();
   });
 
   it('yield 可以拿到 send 的值', done => {
@@ -97,7 +140,7 @@ describe('__tests__/driver.test.ts', () => {
 
     const d = new TaskDriver([t1, t2], new TimeoutScheduler());
 
-    d.on(EVENT.Done, () => done()).start();
+    d.on(EVENT.Empty, () => done()).start();
   });
 
   it('yield 可以 catch', done => {
@@ -111,7 +154,7 @@ describe('__tests__/driver.test.ts', () => {
     const t1 = new SingleTask(i1);
 
     const d = new TaskDriver(t1, new TimeoutScheduler(), () => {});
-    d.on(EVENT.Done, () => done()).start();
+    d.on(EVENT.Empty, () => done()).start();
   });
 
   describe('优先级任务', () => {
@@ -136,7 +179,7 @@ describe('__tests__/driver.test.ts', () => {
         cnt--;
       });
 
-      d.on(EVENT.Done, () => {
+      d.on(EVENT.Empty, () => {
         done();
       });
 
@@ -169,7 +212,7 @@ describe('__tests__/driver.test.ts', () => {
         if (cnt === 5) throw new Error();
       });
 
-      d.on(EVENT.Done, () => {
+      d.on(EVENT.Empty, () => {
         done();
       });
 
@@ -201,7 +244,7 @@ describe('__tests__/driver.test.ts', () => {
         cnt === 4 && expect(value).toBe('i2.2');
       });
 
-      d.on(EVENT.Done, () => {
+      d.on(EVENT.Empty, () => {
         done();
       });
 

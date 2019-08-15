@@ -1,4 +1,8 @@
-export class BaseEvent {}
+export class BaseEvent {
+  constructor(...args: any[]) {
+    void args;
+  }
+}
 
 export class EventBus {
   private handleMap = new Map<BaseEvent, Function[]>();
