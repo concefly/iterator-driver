@@ -75,21 +75,42 @@ describe('__tests__/driver.test.ts', () => {
     const i1 = (function*() {
       let res: any;
 
-      res = yield new Promise(resolve => setTimeout(() => resolve('a'), 100));
-      expect(res).toEqual('a');
+      res = yield new Promise(resolve => setTimeout(() => resolve('1.1'), 100));
+      expect(res).toEqual('1.1');
 
-      res = yield 'b';
-      expect(res).toEqual('b');
+      res = yield '1.2';
+      expect(res).toEqual('1.2');
+    })();
+
+    const i2 = (function*() {
+      let res: any;
+
+      res = yield new Promise(resolve => setTimeout(() => resolve('2.1'), 100));
+      expect(res).toEqual('2.1');
+
+      res = yield '2.2';
+      expect(res).toEqual('2.2');
+    })();
+
+    const t1 = new SingleTask(i1);
+    const t2 = new SingleTask(i2);
+
+    const d = new TaskDriver([t1, t2], new TimeoutScheduler());
+
+    d.on(EVENT.Done, () => done()).start();
+  });
+
+  it('yield 可以 catch', done => {
+    const i1 = (function*() {
+      try {
+        yield Promise.reject('err');
+      } catch (e) {
+        expect(e).toEqual('err');
+      }
     })();
     const t1 = new SingleTask(i1);
 
-    let cnt = 0;
-    const d = new TaskDriver(t1, new TimeoutScheduler(), value => {
-      cnt++;
-      cnt === 1 && expect(value).toEqual('a');
-      cnt === 2 && expect(value).toEqual('b');
-    });
-
+    const d = new TaskDriver(t1, new TimeoutScheduler(), () => {});
     d.on(EVENT.Done, () => done()).start();
   });
 
