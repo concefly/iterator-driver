@@ -4,9 +4,23 @@ import { BaseScheduler } from './scheduler';
 import { runtimeMs } from './util';
 
 export const EVENT = {
+  /** 开始 */
   Start: class extends BaseEvent {},
+
+  /** 每个 yield 事件 */
+  Call: class Call<T> extends BaseEvent {
+    constructor(public value: T) {
+      super();
+    }
+  },
+
+  /** 某个 iterator 结束 */
   DoneOne: class extends BaseEvent {},
+
+  /** 所有 iterator 结束 */
   Done: class extends BaseEvent {},
+
+  /** 取消 */
   Cancel: class extends BaseEvent {},
 };
 
@@ -83,6 +97,7 @@ export class TaskDriver<T> {
       // 未结束的任务要重新入队列
       this.taskQueue.unshift(task);
       this.callback(value);
+      this.eventBus.emit(new EVENT.Call(value));
     }
 
     // 调度下一个
@@ -90,8 +105,8 @@ export class TaskDriver<T> {
   };
 
   start() {
-    this.eventBus.emit(new EVENT.Start());
     this.runNextSlice();
+    this.eventBus.emit(new EVENT.Start());
     return this;
   }
 

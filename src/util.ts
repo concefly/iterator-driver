@@ -1,4 +1,4 @@
-export const runtimeMs = (fn: Function): [any, number] => {
+export function runtimeMs<F extends (...args: any) => any>(fn: F): [ReturnType<F>, number] {
   const a = new Date();
   const res = fn();
   const b = new Date();
@@ -6,4 +6,4 @@ export const runtimeMs = (fn: Function): [any, number] => {
   const delta = b.valueOf() - a.valueOf();
 
   return [res, delta];
-};
+}
