@@ -1,21 +1,25 @@
 import { EventBus, BaseEvent } from './event';
 import { BaseTask } from './task';
 import { BaseScheduler } from './scheduler';
-import { runtimeMs } from './util';
+import { runtimeMs, toPromise } from './util';
 
 export const EVENT = {
   /** 开始 */
   Start: class extends BaseEvent {},
 
   /** 每个 yield 事件 */
-  Call: class Call<T> extends BaseEvent {
+  Call: class<T> extends BaseEvent {
     constructor(public value: T) {
       super();
     }
   },
 
   /** 某个 iterator 结束 */
-  DoneOne: class extends BaseEvent {},
+  DoneOne: class<T> extends BaseEvent {
+    constructor(public value: T) {
+      super();
+    }
+  },
 
   /** 所有 iterator 结束 */
   Done: class extends BaseEvent {},
@@ -73,7 +77,7 @@ export class TaskDriver<T> {
     this.cancelSchedule = null;
   }
 
-  private runNextSlice = () => {
+  private runNextSlice = (send?: any) => {
     // 任务队列空 -> 结束当前 slice
     if (this.taskQueue.length === 0) {
       this.eventBus.emit(new EVENT.Done());
@@ -83,7 +87,7 @@ export class TaskDriver<T> {
     this.sortTaskQueue();
     const task = this.taskQueue.pop();
 
-    const [{ value, done }, ms] = runtimeMs(() => task.iter.next());
+    const [{ value, done }, ms] = runtimeMs(() => task.iter.next(send));
 
     // 记录运行时间
     this.taskRuntimeInfo.set(task, {
@@ -91,17 +95,24 @@ export class TaskDriver<T> {
       ms,
     });
 
-    if (done) {
-      this.eventBus.emit(new EVENT.DoneOne());
-    } else {
-      // 未结束的任务要重新入队列
-      this.taskQueue.unshift(task);
-      this.callback(value);
-      this.eventBus.emit(new EVENT.Call(value));
-    }
+    toPromise(value)
+      .then(resolvedValue => {
+        if (done) {
+          this.eventBus.emit(new EVENT.DoneOne(resolvedValue));
+        } else {
+          // 未结束的任务要重新入队列
+          this.taskQueue.unshift(task);
 
-    // 调度下一个
-    this.cancelSchedule = this.scheduler.schedule(this.runNextSlice);
+          this.callback(resolvedValue);
+          this.eventBus.emit(new EVENT.Call(resolvedValue));
+        }
+
+        // 调度下一个
+        this.cancelSchedule = this.scheduler.schedule(() => this.runNextSlice(resolvedValue));
+      })
+      .catch(e => {
+        throw e;
+      });
   };
 
   start() {

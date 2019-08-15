@@ -46,6 +46,53 @@ describe('__tests__/driver.test.ts', () => {
     d.start();
   });
 
+  it('可以 yield 各种值', done => {
+    const i1 = (function*() {
+      yield null;
+      yield undefined;
+      yield 'a';
+      yield new Promise(resolve => setTimeout(() => resolve('b'), 100));
+      yield [1, new Promise(resolve => setTimeout(() => resolve('1.1'), 100))];
+      yield { c: 'c' };
+    })();
+    const t1 = new SingleTask(i1);
+
+    let cnt = 0;
+    const d = new TaskDriver(t1, new TimeoutScheduler(), value => {
+      cnt++;
+      cnt === 1 && expect(value).toBeNull();
+      cnt === 2 && expect(value).toBeUndefined();
+      cnt === 3 && expect(value).toEqual('a');
+      cnt === 4 && expect(value).toEqual('b');
+      cnt === 5 && expect(value).toEqual([1, '1.1']);
+      cnt === 6 && expect(value).toEqual({ c: 'c' });
+    });
+
+    d.on(EVENT.Done, () => done()).start();
+  });
+
+  it('yield 可以拿到 send 的值', done => {
+    const i1 = (function*() {
+      let res: any;
+
+      res = yield new Promise(resolve => setTimeout(() => resolve('a'), 100));
+      expect(res).toEqual('a');
+
+      res = yield 'b';
+      expect(res).toEqual('b');
+    })();
+    const t1 = new SingleTask(i1);
+
+    let cnt = 0;
+    const d = new TaskDriver(t1, new TimeoutScheduler(), value => {
+      cnt++;
+      cnt === 1 && expect(value).toEqual('a');
+      cnt === 2 && expect(value).toEqual('b');
+    });
+
+    d.on(EVENT.Done, () => done()).start();
+  });
+
   describe('优先级任务', () => {
     it('priority 调度', done => {
       const i1 = (function*() {
