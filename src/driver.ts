@@ -7,6 +7,7 @@ export type ITaskRuntimeInfo = {
   /** 运行 ms 数 */
   ms: number;
   sendValue?: any;
+  cancelSchedule?: () => void;
 };
 
 /** 创建切片任务驱动器 */
@@ -14,7 +15,6 @@ export class TaskDriver<T> {
   private taskQueue: BaseTask<T>[] = [];
   private taskRuntimeInfo = new WeakMap<BaseTask<T>, ITaskRuntimeInfo>();
   private eventBus = new EventBus();
-  private cancelSchedule: Function;
 
   constructor(
     task: BaseTask<T>[] | BaseTask<T>,
@@ -51,13 +51,16 @@ export class TaskDriver<T> {
     });
   }
 
-  private resetState() {
-    this.taskQueue.forEach(task => {
+  private resetTaskState(tasks: BaseTask<T>[]) {
+    tasks.forEach(task => {
       task.iter.return();
+
+      // 结束所有 task 调度器
+      const { cancelSchedule } = this.getRuntimeInfo(task);
+      cancelSchedule && cancelSchedule();
+
       this.taskRuntimeInfo.delete(task);
     });
-    this.taskQueue = [];
-    this.cancelSchedule = null;
   }
 
   private mergeRuntimeInfo(task: BaseTask<T>, info: Partial<ITaskRuntimeInfo>) {
@@ -107,14 +110,18 @@ export class TaskDriver<T> {
         }
 
         // 调度下一个
-        this.cancelSchedule = this.scheduler.schedule(this.runNextSlice);
+        this.mergeRuntimeInfo(task, {
+          cancelSchedule: this.scheduler.schedule(this.runNextSlice),
+        });
       })
       .catch(e => {
         task.iter.throw(e);
         this.emitAll(new EVENT.Done(e, undefined), [task]);
 
         // 调度下一个
-        this.cancelSchedule = this.scheduler.schedule(this.runNextSlice);
+        this.mergeRuntimeInfo(task, {
+          cancelSchedule: this.scheduler.schedule(this.runNextSlice),
+        });
       });
   };
 
@@ -124,10 +131,15 @@ export class TaskDriver<T> {
     return this;
   }
 
-  cancel() {
-    this.cancelSchedule && this.cancelSchedule();
-    this.resetState();
-    this.emitAll(new EVENT.Cancel(), this.taskQueue);
+  cancel(task?: BaseTask<T>) {
+    const tasksToCancel = task ? [task] : this.taskQueue;
+
+    this.resetTaskState(tasksToCancel);
+    this.emitAll(new EVENT.Cancel(), tasksToCancel);
+
+    // 从 taskQueue 中剔除
+    this.taskQueue = this.taskQueue.filter(t => !tasksToCancel.includes(t));
+
     return this;
   }
 
