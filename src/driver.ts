@@ -1,32 +1,7 @@
-import { EventBus, BaseEvent } from './event';
-import { BaseTask } from './task';
+import { EventBus, BaseEvent, EVENT } from './event';
+import { BaseTask, SingleTask } from './task';
 import { BaseScheduler } from './scheduler';
 import { runtimeMs, toPromise } from './util';
-
-export const EVENT = {
-  /** 开始 */
-  Start: class extends BaseEvent {},
-
-  /** 每个 yield 事件 */
-  Yield: class<T> extends BaseEvent {
-    constructor(public value: T) {
-      super();
-    }
-  },
-
-  /** 某个 iterator 结束 */
-  Done: class<T> extends BaseEvent {
-    constructor(public error: Error, public value: T) {
-      super();
-    }
-  },
-
-  /** 所有 iterator 结束 */
-  Empty: class extends BaseEvent {},
-
-  /** 取消 */
-  Cancel: class extends BaseEvent {},
-};
 
 export type ITaskRuntimeInfo = {
   /** 运行 ms 数 */
@@ -48,6 +23,15 @@ export class TaskDriver<T> {
   ) {
     // 初始化任务队列
     this.taskQueue = Array.isArray(task) ? [...task] : [task];
+  }
+
+  private emitAll<E extends BaseEvent>(event: E, tasks: BaseTask<T>[]) {
+    // 给自己 emit
+    this.eventBus.emit(event);
+    // 给 task emit
+    for (const task of tasks) {
+      task.eventBus.emit(event);
+    }
   }
 
   /** 优先级大的排后面 */
@@ -94,7 +78,7 @@ export class TaskDriver<T> {
   private runNextSlice = () => {
     // 任务队列空 -> 结束当前 slice
     if (this.taskQueue.length === 0) {
-      this.eventBus.emit(new EVENT.Empty());
+      this.emitAll(new EVENT.Empty(), []);
       return;
     }
 
@@ -113,13 +97,13 @@ export class TaskDriver<T> {
         this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
 
         if (done) {
-          this.eventBus.emit(new EVENT.Done(null, resolvedValue));
+          this.emitAll(new EVENT.Done(null, resolvedValue), [task]);
         } else {
           // 未结束的任务要重新入队列
           this.taskQueue.unshift(task);
 
           this.callback && this.callback(resolvedValue);
-          this.eventBus.emit(new EVENT.Yield(resolvedValue));
+          this.emitAll(new EVENT.Yield(resolvedValue), [task]);
         }
 
         // 调度下一个
@@ -127,7 +111,7 @@ export class TaskDriver<T> {
       })
       .catch(e => {
         task.iter.throw(e);
-        this.eventBus.emit(new EVENT.Done(e, undefined));
+        this.emitAll(new EVENT.Done(e, undefined), [task]);
 
         // 调度下一个
         this.cancelSchedule = this.scheduler.schedule(this.runNextSlice);
@@ -135,29 +119,36 @@ export class TaskDriver<T> {
   };
 
   start() {
+    this.emitAll(new EVENT.Start(), this.taskQueue);
     this.runNextSlice();
-    this.eventBus.emit(new EVENT.Start());
     return this;
   }
 
   cancel() {
     this.cancelSchedule && this.cancelSchedule();
     this.resetState();
-    this.eventBus.emit(new EVENT.Cancel());
+    this.emitAll(new EVENT.Cancel(), this.taskQueue);
     return this;
   }
 
-  addTask(task: BaseTask<T>) {
-    this.taskQueue.push(task);
+  addTask(task: BaseTask<T> | IterableIterator<T>) {
+    const _task = task instanceof BaseTask ? task : new SingleTask(task);
+    this.taskQueue.push(_task);
+
+    // 空队列重新开始
+    if (this.taskQueue.length === 1) {
+      this.start();
+    }
+
     return this;
   }
 
-  on<T extends typeof BaseEvent>(type: T, h: (event: InstanceType<T>) => void) {
+  on<E extends typeof BaseEvent>(type: E, h: (event: InstanceType<E>) => void) {
     this.eventBus.on(type, h);
     return this;
   }
 
-  off<T extends typeof BaseEvent>(type?: T, h?: Function) {
+  off<E extends typeof BaseEvent>(type?: E, h?: Function) {
     this.eventBus.off(type, h);
     return this;
   }

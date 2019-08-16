@@ -23,7 +23,7 @@ describe('__tests__/driver.test.ts', () => {
     d.start();
   });
 
-  it('事件流', done => {
+  it('driver 事件流', done => {
     const i1 = (function*() {
       yield '1.1';
       yield '1.2';
@@ -64,6 +64,36 @@ describe('__tests__/driver.test.ts', () => {
         done();
       })
       .start();
+  });
+
+  it('task 事件流', done => {
+    const i1 = (function*() {
+      yield '1.1';
+      yield '1.2';
+      return '1.3';
+    })();
+
+    const t1Flag = {
+      Start: 0,
+      Yield: 0,
+      Done: 0,
+    };
+
+    const t1 = new SingleTask(i1)
+      .on(EVENT.Start, () => t1Flag.Start++)
+      .on(EVENT.Yield, () => t1Flag.Yield++)
+      .on(EVENT.Done, () => t1Flag.Done++);
+
+    const d = new TaskDriver([t1], new TimeoutScheduler());
+
+    d.on(EVENT.Empty, () => {
+      expect(t1Flag).toEqual({
+        Start: 1,
+        Yield: 2,
+        Done: 1,
+      });
+      done();
+    }).start();
   });
 
   it('多串行任务', done => {
@@ -155,6 +185,41 @@ describe('__tests__/driver.test.ts', () => {
 
     const d = new TaskDriver(t1, new TimeoutScheduler(), () => {});
     d.on(EVENT.Empty, () => done()).start();
+  });
+
+  it('Empty 后 addTask 可以继续调度', done => {
+    const i1 = (function*() {
+      yield '1.1';
+    })();
+    const t1 = new SingleTask(i1);
+
+    const d = new TaskDriver(t1, new TimeoutScheduler());
+
+    let flag = 1;
+    let startCnt = 0;
+
+    d.on(EVENT.Start, () => {
+      startCnt++;
+    })
+      .on(EVENT.Empty, () => {
+        flag === 2 &&
+          (d.addTask(
+            (function*() {
+              yield '2.1';
+            })()
+          ),
+          (flag = 3));
+
+        if (flag === 4) {
+          expect(startCnt).toEqual(2);
+          done();
+        }
+      })
+      .on(EVENT.Yield, e => {
+        flag === 1 && (expect(e.value).toEqual('1.1'), (flag = 2));
+        flag === 3 && (expect(e.value).toEqual('2.1'), (flag = 4));
+      })
+      .start();
   });
 
   describe('优先级任务', () => {
