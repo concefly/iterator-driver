@@ -91,8 +91,8 @@ export class TaskDriver<T> {
     const { sendValue } = this.getRuntimeInfo(task);
     const [{ value, done }, ms] = runtimeMs(() => task.iter.next(sendValue));
 
-    // 记录运行时间
-    this.mergeRuntimeInfo(task, { ms });
+    // 累加运行时间
+    this.mergeRuntimeInfo(task, { ms: this.getRuntimeInfo(task).ms + ms });
 
     toPromise(value)
       .then(resolvedValue => {
