@@ -1,6 +1,19 @@
+import { EventBus, BaseEvent } from './event';
+
 export class BaseTask<T> {
   iter: IterableIterator<T> = null;
   priority: number = 0;
+  eventBus = new EventBus();
+
+  on<T extends typeof BaseEvent>(type: T, h: (event: InstanceType<T>) => void) {
+    this.eventBus.on(type, h);
+    return this;
+  }
+
+  off<T extends typeof BaseEvent>(type?: T, h?: Function) {
+    this.eventBus.off(type, h);
+    return this;
+  }
 }
 
 export class SingleTask<T> extends BaseTask<T> {
