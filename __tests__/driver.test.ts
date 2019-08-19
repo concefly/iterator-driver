@@ -193,41 +193,6 @@ describe('__tests__/driver.test.ts', () => {
     d.on(EVENT.Empty, () => done()).start();
   });
 
-  it('Empty 后 addTask 可以继续调度', done => {
-    const i1 = (function*() {
-      yield '1.1';
-    })();
-    const t1 = new SingleTask(i1);
-
-    const d = new TaskDriver(t1, new TimeoutScheduler());
-
-    let flag = 1;
-    let startCnt = 0;
-
-    d.on(EVENT.Start, () => {
-      startCnt++;
-    })
-      .on(EVENT.Empty, () => {
-        flag === 2 &&
-          (d.addTask(
-            (function*() {
-              yield '2.1';
-            })()
-          ),
-          (flag = 3));
-
-        if (flag === 4) {
-          expect(startCnt).toEqual(2);
-          done();
-        }
-      })
-      .on(EVENT.Yield, e => {
-        flag === 1 && (expect(e.value).toEqual('1.1'), (flag = 2));
-        flag === 3 && (expect(e.value).toEqual('2.1'), (flag = 4));
-      })
-      .start();
-  });
-
   describe('优先级任务', () => {
     it('priority 调度', done => {
       const i1 = (function*() {

@@ -1,7 +1,7 @@
 import { EventBus, BaseEvent, EVENT } from './event';
 import { BaseTask, SingleTask } from './task';
 import { BaseScheduler } from './scheduler';
-import { runtimeMs, toPromise } from './util';
+import { runtimeMs, toPromise, ensureUnique } from './util';
 
 export type ITaskRuntimeInfo = {
   /** 运行 ms 数 */
@@ -12,20 +12,22 @@ export type ITaskRuntimeInfo = {
 
 /** 创建切片任务驱动器 */
 export class TaskDriver<T> {
-  private taskQueue: BaseTask<T>[] = [];
-  private taskRuntimeInfo = new WeakMap<BaseTask<T>, ITaskRuntimeInfo>();
-  private eventBus = new EventBus();
+  protected taskQueue: BaseTask<T>[] = [];
+  protected taskRuntimeInfo = new WeakMap<BaseTask<T>, ITaskRuntimeInfo>();
+  protected eventBus = new EventBus();
 
   constructor(
     task: BaseTask<T>[] | BaseTask<T>,
-    private readonly scheduler: BaseScheduler,
-    private readonly callback?: (value: T) => void
+    protected readonly scheduler: BaseScheduler,
+    protected readonly callback?: (value: T) => void
   ) {
     // 初始化任务队列
     this.taskQueue = Array.isArray(task) ? [...task] : [task];
+
+    ensureUnique(this.taskQueue, 'name');
   }
 
-  private emitAll<E extends BaseEvent>(event: E, tasks: BaseTask<T>[]) {
+  protected emitAll<E extends BaseEvent>(event: E, tasks: BaseTask<T>[]) {
     // 给自己 emit
     this.eventBus.emit(event);
     // 给 task emit
@@ -35,7 +37,7 @@ export class TaskDriver<T> {
   }
 
   /** 优先级大的排后面 */
-  private sortTaskQueue() {
+  protected sortTaskQueue() {
     this.taskQueue.sort((a, b) => {
       return (
         // 优先级排序
@@ -51,7 +53,7 @@ export class TaskDriver<T> {
     });
   }
 
-  private resetTaskState(tasks: BaseTask<T>[]) {
+  protected resetTaskState(tasks: BaseTask<T>[]) {
     tasks.forEach(task => {
       task.iter.return();
 
@@ -63,14 +65,14 @@ export class TaskDriver<T> {
     });
   }
 
-  private mergeRuntimeInfo(task: BaseTask<T>, info: Partial<ITaskRuntimeInfo>) {
+  protected mergeRuntimeInfo(task: BaseTask<T>, info: Partial<ITaskRuntimeInfo>) {
     this.taskRuntimeInfo.set(task, {
       ...this.taskRuntimeInfo.get(task),
       ...info,
     });
   }
 
-  private getRuntimeInfo(task: BaseTask<T>): ITaskRuntimeInfo {
+  protected getRuntimeInfo(task: BaseTask<T>): ITaskRuntimeInfo {
     return {
       ms: 0,
       sendValue: undefined,
@@ -78,7 +80,7 @@ export class TaskDriver<T> {
     };
   }
 
-  private runNextSlice = () => {
+  protected runNextSlice = () => {
     // 任务队列空 -> 结束当前 slice
     if (this.taskQueue.length === 0) {
       this.emitAll(new EVENT.Empty(), []);
@@ -147,12 +149,13 @@ export class TaskDriver<T> {
     const _task = task instanceof BaseTask ? task : new SingleTask(task);
     this.taskQueue.push(_task);
 
-    // 空队列重新开始
-    if (this.taskQueue.length === 1) {
-      this.start();
-    }
+    ensureUnique(this.taskQueue, 'name');
 
     return this;
+  }
+
+  getTaskQueue() {
+    return [...this.taskQueue];
   }
 
   on<E extends typeof BaseEvent>(type: E, h: (event: InstanceType<E>) => void) {
