@@ -1,9 +1,11 @@
 import { EventBus, BaseEvent } from './event';
+import { getUUid } from './util';
 
 export class BaseTask<T> {
   iter: IterableIterator<T> = null;
   priority: number = 0;
   eventBus = new EventBus();
+  name: string;
 
   on<T extends typeof BaseEvent>(type: T, h: (event: InstanceType<T>) => void) {
     this.eventBus.on(type, h);
@@ -17,13 +19,21 @@ export class BaseTask<T> {
 }
 
 export class SingleTask<T> extends BaseTask<T> {
-  constructor(readonly iter: IterableIterator<T>, public priority: number = 0) {
+  constructor(
+    readonly iter: IterableIterator<T>,
+    public priority: number = 0,
+    public readonly name: string = getUUid()
+  ) {
     super();
   }
 }
 
 export class SerialTask<T> extends BaseTask<T> {
-  constructor(private readonly iters: IterableIterator<T>[], public priority: number = 0) {
+  constructor(
+    private readonly iters: IterableIterator<T>[],
+    public priority: number = 0,
+    public readonly name: string = getUUid()
+  ) {
     super();
 
     const self = this;
