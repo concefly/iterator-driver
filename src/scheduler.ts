@@ -6,8 +6,12 @@ export class BaseScheduler {
 }
 
 export class TimeoutScheduler extends BaseScheduler {
+  constructor(private readonly timeout = 0) {
+    super();
+  }
+
   schedule(callback: () => void): () => void {
-    const tid = setTimeout(() => callback(), 0);
+    const tid = setTimeout(() => callback(), this.timeout);
 
     return () => {
       clearTimeout(tid);

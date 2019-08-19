@@ -100,13 +100,13 @@ export class TaskDriver<T> {
         this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
 
         if (done) {
-          this.emitAll(new EVENT.Done(null, resolvedValue), [task]);
+          this.emitAll(new EVENT.Done(null, resolvedValue, task), [task]);
         } else {
           // 未结束的任务要重新入队列
           this.taskQueue.unshift(task);
 
           this.callback && this.callback(resolvedValue);
-          this.emitAll(new EVENT.Yield(resolvedValue), [task]);
+          this.emitAll(new EVENT.Yield(resolvedValue, task), [task]);
         }
 
         // 调度下一个
@@ -116,7 +116,7 @@ export class TaskDriver<T> {
       })
       .catch(e => {
         task.iter.throw(e);
-        this.emitAll(new EVENT.Done(e, undefined), [task]);
+        this.emitAll(new EVENT.Done(e, undefined, task), [task]);
 
         // 调度下一个
         this.mergeRuntimeInfo(task, {

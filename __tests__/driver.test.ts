@@ -51,12 +51,18 @@ describe('__tests__/driver.test.ts', () => {
         cnt === 3 && expect(e.value).toEqual('1.2');
         cnt === 5 && expect(e.value).toEqual('2.1');
         cnt === 6 && expect(e.value).toEqual('2.2');
+
+        (cnt === 2 || cnt === 3) && expect(e.task).toEqual(t1);
+        (cnt === 5 || cnt === 6) && expect(e.task).toEqual(t2);
       })
       .on(EVENT.Done, e => {
         cnt++;
         cnt === 4 && expect(e.value).toEqual('1.3');
         cnt === 7 && expect(e.value).toEqual('2.3');
         expect(e.error).toBeNull();
+
+        cnt === 4 && expect(e.task).toEqual(t1);
+        cnt === 7 && expect(e.task).toEqual(t2);
       })
       .on(EVENT.Empty, () => {
         cnt++;

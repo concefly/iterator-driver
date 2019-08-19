@@ -1,3 +1,5 @@
+import { BaseTask } from './task';
+
 export class BaseEvent {
   constructor(...args: any[]) {
     void args;
@@ -10,15 +12,15 @@ export const EVENT = {
   Start: class extends BaseEvent {},
 
   /** 每个 yield 事件 */
-  Yield: class<T> extends BaseEvent {
-    constructor(public value: T) {
+  Yield: class<V, T> extends BaseEvent {
+    constructor(public readonly value: V, public readonly task: BaseTask<T>) {
       super();
     }
   },
 
   /** 某个 iterator 结束 */
-  Done: class<T> extends BaseEvent {
-    constructor(public error: Error, public value: T) {
+  Done: class<V, T> extends BaseEvent {
+    constructor(public error: Error, public value: V, public readonly task: BaseTask<T>) {
       super();
     }
   },
