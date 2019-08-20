@@ -36,3 +36,28 @@ export class IdleScheduler extends BaseScheduler {
     };
   }
 }
+
+/** 组合调度器 */
+export function composeScheduler<S extends BaseScheduler>(list: S[]): typeof BaseScheduler {
+  const ComposedScheduler = class extends BaseScheduler {
+    schedule(callback: () => void): () => void {
+      const calledFlagMap = new Set<S>();
+
+      const disposeList = list.map(s =>
+        s.schedule(() => {
+          calledFlagMap.add(s);
+
+          if (list.every(_s => calledFlagMap.has(_s))) {
+            callback();
+          }
+        })
+      );
+
+      return () => {
+        disposeList.forEach(fn => fn());
+      };
+    }
+  };
+
+  return ComposedScheduler;
+}
