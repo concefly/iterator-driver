@@ -147,7 +147,7 @@ export class TaskDriver<T> {
 
   addTask(task: BaseTask<T> | IterableIterator<T>) {
     const _task = task instanceof BaseTask ? task : new SingleTask(task);
-    this.taskQueue.push(_task);
+    this.taskQueue.unshift(_task);
 
     ensureUnique(this.taskQueue, 'name');
 
