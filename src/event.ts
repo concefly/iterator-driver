@@ -1,6 +1,8 @@
 import { BaseTask } from './task';
 
 export class BaseEvent {
+  static displayName = 'BaseEvent';
+
   constructor(...args: any[]) {
     void args;
   }
@@ -9,10 +11,13 @@ export class BaseEvent {
 /** 全局要用的 event */
 export const EVENT = {
   /** 开始 */
-  Start: class extends BaseEvent {},
+  Start: class extends BaseEvent {
+    static displayName = 'Start';
+  },
 
   /** 每个 yield 事件 */
   Yield: class<V, T> extends BaseEvent {
+    static displayName = 'Yield';
     constructor(public readonly value: V, public readonly task: BaseTask<T>) {
       super();
     }
@@ -20,16 +25,21 @@ export const EVENT = {
 
   /** 某个 iterator 结束 */
   Done: class<V, T> extends BaseEvent {
+    static displayName = 'Done';
     constructor(public error: Error, public value: V, public readonly task: BaseTask<T>) {
       super();
     }
   },
 
   /** 所有 iterator 结束 */
-  Empty: class extends BaseEvent {},
+  Empty: class extends BaseEvent {
+    static displayName = 'Empty';
+  },
 
   /** 取消 */
-  Cancel: class extends BaseEvent {},
+  Cancel: class extends BaseEvent {
+    static displayName = 'Cancel';
+  },
 };
 
 export class EventBus {

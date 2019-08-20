@@ -22,7 +22,7 @@ export class SingleTask<T> extends BaseTask<T> {
   constructor(
     readonly iter: IterableIterator<T>,
     public priority: number = 0,
-    public readonly name: string = getUUid()
+    public readonly name: string = getUUid('SingleTask-')
   ) {
     super();
   }
@@ -32,7 +32,7 @@ export class SerialTask<T> extends BaseTask<T> {
   constructor(
     private readonly iters: IterableIterator<T>[],
     public priority: number = 0,
-    public readonly name: string = getUUid()
+    public readonly name: string = getUUid('SerialTask-')
   ) {
     super();
 

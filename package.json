@@ -1,7 +1,7 @@
 {
   "name": "iterator-driver",
-  "version": "1.0.0",
-  "description": "",
+  "version": "1.0.1",
+  "description": "Tiny 迭代器驱动",
   "files": [
     "dist"
   ],
@@ -20,7 +20,7 @@
     "type": "git",
     "url": "git+https://github.com/concefly/iterator-driver.git"
   },
-  "author": "concefly",
+  "author": "concefly@foxmail.com",
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/concefly/iterator-driver/issues"
