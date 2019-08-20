@@ -3,6 +3,7 @@
 ![npm bundle size](https://img.shields.io/bundlephobia/min/iterator-driver)
 ![npm (tag)](https://img.shields.io/npm/v/iterator-driver/latest)
 ![npm](https://img.shields.io/npm/dw/iterator-driver)
+![Travis (.org)](https://img.shields.io/travis/concefly/iterator-driver)
 
 ### 🏠 [Homepage](https://github.com/concefly/iterator-driver#readme)
 
