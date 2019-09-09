@@ -40,6 +40,16 @@ export const EVENT = {
   Cancel: class extends BaseEvent {
     static displayName = 'Cancel';
   },
+
+  /** 暂停 */
+  Pause: class extends BaseEvent {
+    static displayName = 'Pause';
+  },
+
+  /** 恢复 */
+  Resume: class extends BaseEvent {
+    static displayName = 'Resume';
+  },
 };
 
 export class EventBus {

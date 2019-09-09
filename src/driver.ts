@@ -15,6 +15,7 @@ export class TaskDriver<T> {
   protected taskQueue: BaseTask<T>[] = [];
   protected taskRuntimeInfo = new WeakMap<BaseTask<T>, ITaskRuntimeInfo>();
   protected eventBus = new EventBus();
+  protected isPaused = false;
 
   constructor(
     task: BaseTask<T>[] | BaseTask<T>,
@@ -81,6 +82,8 @@ export class TaskDriver<T> {
   }
 
   protected runNextSlice = () => {
+    if (this.isPaused) return;
+
     // 任务队列空 -> 结束当前 slice
     if (this.taskQueue.length === 0) {
       this.emitAll(new EVENT.Empty(), []);
@@ -129,6 +132,19 @@ export class TaskDriver<T> {
 
   start() {
     this.emitAll(new EVENT.Start(), this.taskQueue);
+    this.runNextSlice();
+    return this;
+  }
+
+  pause() {
+    this.isPaused = true;
+    this.emitAll(new EVENT.Pause(), this.taskQueue);
+    return this;
+  }
+
+  resume() {
+    this.isPaused = false;
+    this.emitAll(new EVENT.Resume(), this.taskQueue);
     this.runNextSlice();
     return this;
   }
