@@ -1,4 +1,12 @@
-import { SingleTask, TaskDriver, TimeoutScheduler, EVENT, SerialTask } from '../src';
+import {
+  SingleTask,
+  TaskDriver,
+  TimeoutScheduler,
+  EVENT,
+  SerialTask,
+  DoneEvent,
+  EmptyEvent,
+} from '../src';
 
 describe('__tests__/driver.test.ts', () => {
   it('单任务', done => {
@@ -285,6 +293,57 @@ describe('__tests__/driver.test.ts', () => {
       });
 
       d.start();
+    });
+  });
+
+  describe('错误堆栈还原', () => {
+    it('同步栈 & 异步栈', done => {
+      const invokeCnt = { i1: 0, i2: 0, i3: 0 };
+      const invokeErrorEvents: DoneEvent[] = [];
+
+      // 同步栈
+      const i1 = (function*() {
+        invokeCnt.i1++;
+        yield 1;
+        throw new Error('fake error1');
+      })();
+
+      // 异步栈
+      const i2 = (function*() {
+        invokeCnt.i2++;
+        yield new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('fake error2')), 0);
+        });
+      })();
+
+      // 正常任务
+      const i3 = (function*() {
+        yield invokeCnt.i3++;
+        yield invokeCnt.i3++;
+      })();
+
+      const t1 = new SingleTask<any>(i1, 10);
+      const t2 = new SingleTask<any>(i2);
+      const t3 = new SingleTask<any>(i3);
+
+      new TaskDriver([t1, t2, t3], new TimeoutScheduler())
+        .on(DoneEvent, e => {
+          if (e.error) {
+            invokeErrorEvents.push(e);
+          }
+        })
+        .on(EmptyEvent, () => {
+          expect(invokeCnt).toStrictEqual({ i1: 1, i2: 1, i3: 2 });
+
+          expect(invokeErrorEvents[0].error.message).toContain('fake error1');
+          expect(invokeErrorEvents[0].task.name).toBe(t1.name);
+
+          expect(invokeErrorEvents[1].error.message).toContain('fake error2');
+          expect(invokeErrorEvents[1].task.name).toBe(t2.name);
+
+          done();
+        })
+        .start();
     });
   });
 });

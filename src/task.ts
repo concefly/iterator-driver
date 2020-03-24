@@ -1,7 +1,7 @@
 import { EventBus, BaseEvent } from './event';
 import { getUUid } from './util';
 
-export class BaseTask<T> {
+export class BaseTask<T = any> {
   iter: IterableIterator<T> = null;
   priority: number = 0;
   eventBus = new EventBus();
@@ -18,7 +18,7 @@ export class BaseTask<T> {
   }
 }
 
-export class SingleTask<T> extends BaseTask<T> {
+export class SingleTask<T = any> extends BaseTask<T> {
   constructor(
     readonly iter: IterableIterator<T>,
     public priority: number = 0,
@@ -28,7 +28,7 @@ export class SingleTask<T> extends BaseTask<T> {
   }
 }
 
-export class SerialTask<T> extends BaseTask<T> {
+export class SerialTask<T = any> extends BaseTask<T> {
   constructor(
     private readonly iters: IterableIterator<T>[],
     public priority: number = 0,

@@ -11,7 +11,7 @@ export type ITaskRuntimeInfo = {
 };
 
 /** 创建切片任务驱动器 */
-export class TaskDriver<T> {
+export class TaskDriver<T = any> {
   protected taskQueue: BaseTask<T>[] = [];
   protected taskRuntimeInfo = new WeakMap<BaseTask<T>, ITaskRuntimeInfo>();
   protected eventBus = new EventBus();
@@ -93,41 +93,52 @@ export class TaskDriver<T> {
     this.sortTaskQueue();
     const task = this.taskQueue.pop();
 
-    const { sendValue } = this.getRuntimeInfo(task);
-    const [{ value, done }, ms] = runtimeMs(() => task.iter.next(sendValue));
-
-    // 累加运行时间
-    this.mergeRuntimeInfo(task, { ms: this.getRuntimeInfo(task).ms + ms });
-
-    toPromise(value)
-      .then(resolvedValue => {
-        // 记录 sendValue
-        this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
-
-        if (done) {
-          this.emitAll(new EVENT.Done(null, resolvedValue, task), [task]);
-        } else {
-          // 未结束的任务要重新入队列
-          this.taskQueue.unshift(task);
-
-          this.callback && this.callback(resolvedValue);
-          this.emitAll(new EVENT.Yield(resolvedValue, task), [task]);
-        }
-
-        // 调度下一个
-        this.mergeRuntimeInfo(task, {
-          cancelSchedule: this.scheduler.schedule(this.runNextSlice),
-        });
-      })
-      .catch(e => {
-        task.iter.throw(e);
-        this.emitAll(new EVENT.Done(e, undefined, task), [task]);
-
-        // 调度下一个
-        this.mergeRuntimeInfo(task, {
-          cancelSchedule: this.scheduler.schedule(this.runNextSlice),
-        });
+    /** 调度下一个 */
+    const cleanAndRunNext = () => {
+      this.mergeRuntimeInfo(task, {
+        cancelSchedule: this.scheduler.schedule(this.runNextSlice),
       });
+    };
+
+    const { sendValue } = this.getRuntimeInfo(task);
+
+    try {
+      const [{ value, done }, ms] = runtimeMs(() => task.iter.next(sendValue));
+
+      // 累加运行时间
+      this.mergeRuntimeInfo(task, { ms: this.getRuntimeInfo(task).ms + ms });
+
+      toPromise(value)
+        .then(resolvedValue => {
+          // 记录 sendValue
+          this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
+
+          if (done) {
+            this.emitAll(new EVENT.Done(null, resolvedValue, task), [task]);
+          } else {
+            // 未结束的任务要重新入队列
+            this.taskQueue.unshift(task);
+
+            this.callback && this.callback(resolvedValue);
+            this.emitAll(new EVENT.Yield(resolvedValue, task), [task]);
+          }
+
+          // 调度下一个
+          cleanAndRunNext();
+        })
+        .catch(e => {
+          this.emitAll(new EVENT.Done(e, undefined, task), [task]);
+
+          // 调度下一个
+          cleanAndRunNext();
+        });
+    } catch (e) {
+      // 发生了同步错误
+      this.emitAll(new EVENT.Done(e, undefined, task), [task]);
+
+      // 调度下一个
+      cleanAndRunNext();
+    }
   };
 
   start() {
@@ -170,6 +181,7 @@ export class TaskDriver<T> {
     return this;
   }
 
+  /** 获取接下来的任务队列 */
   getTaskQueue() {
     return [...this.taskQueue];
   }
