@@ -5,9 +5,10 @@
 ![npm](https://img.shields.io/npm/dw/iterator-driver)
 ![Travis (.org)](https://img.shields.io/travis/concefly/iterator-driver)
 
-### 🏠 [Homepage](https://github.com/concefly/iterator-driver#readme)
-
 Tiny 迭代器驱动
+- 支持静态 & 动态优先级
+- 支持动态插入任务
+- 内置 cpu idle、setTimeout 调度器
 
 ## Usage
 
@@ -52,33 +53,10 @@ t1.priority = 20
 ## Install
 
 ```sh
-npm install
+npm install iterator-driver
 ```
-
-## Run tests
-
-```sh
-npm run test
-```
-
-## Author
-
-👤 **concefly**
-
-* Github: [@concefly](https://github.com/concefly)
-
-## 🤝 Contributing
-
-Contributions, issues and feature requests are welcome !<br />Feel free to check [issues page](https://github.com/concefly/iterator-driver/issues).
-
-## Show your support
-
-Give a ⭐️ if this project helped you !
 
 ## 📝 License
 
 Copyright © 2019 [concefly](https://github.com/concefly).<br />
 This project is [ISC](https://github.com/concefly/iterator-driver/blob/master/LICENSE) licensed.
-
-***
-_This README was generated with ❤️ by [readme-md-generator](https://github.com/kefranabg/readme-md-generator)_
