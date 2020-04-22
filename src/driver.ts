@@ -1,4 +1,14 @@
-import { EventBus, BaseEvent, EVENT } from './event';
+import {
+  EventBus,
+  BaseEvent,
+  DoneEvent,
+  YieldEvent,
+  StartEvent,
+  PauseEvent,
+  ResumeEvent,
+  CancelEvent,
+  EmptyEvent,
+} from './event';
 import { BaseTask, SingleTask } from './task';
 import { BaseScheduler } from './scheduler';
 import { runtimeMs, toPromise, ensureUnique } from './util';
@@ -86,76 +96,75 @@ export class TaskDriver<T = any> {
 
     // 任务队列空 -> 结束当前 slice
     if (this.taskQueue.length === 0) {
-      this.emitAll(new EVENT.Empty(), []);
+      this.emitAll(new EmptyEvent(), []);
       return;
     }
 
     this.sortTaskQueue();
     const task = this.taskQueue.pop();
 
-    /** 调度下一个 */
-    const cleanAndRunNext = () => {
-      this.mergeRuntimeInfo(task, {
-        cancelSchedule: this.scheduler.schedule(this.runNextSlice),
-      });
+    const runTask = () => {
+      const { sendValue } = this.getRuntimeInfo(task);
+
+      try {
+        const [{ value, done }, ms] = runtimeMs(() => task.iter.next(sendValue));
+
+        // 累加运行时间
+        this.mergeRuntimeInfo(task, { ms: this.getRuntimeInfo(task).ms + ms });
+
+        toPromise(value)
+          .then(resolvedValue => {
+            // 记录 sendValue
+            this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
+
+            if (done) {
+              this.emitAll(new DoneEvent(null, resolvedValue, task), [task]);
+            } else {
+              // 未结束的任务要重新入队列
+              this.taskQueue.unshift(task);
+
+              this.callback && this.callback(resolvedValue);
+              this.emitAll(new YieldEvent(resolvedValue, task), [task]);
+            }
+
+            // 调度下一个
+            this.runNextSlice();
+          })
+          .catch(e => {
+            this.emitAll(new DoneEvent(e, undefined, task), [task]);
+
+            // 调度下一个
+            this.runNextSlice();
+          });
+      } catch (e) {
+        // 发生了同步错误
+        this.emitAll(new DoneEvent(e, undefined, task), [task]);
+
+        // 调度下一个
+        this.runNextSlice();
+      }
     };
 
-    const { sendValue } = this.getRuntimeInfo(task);
-
-    try {
-      const [{ value, done }, ms] = runtimeMs(() => task.iter.next(sendValue));
-
-      // 累加运行时间
-      this.mergeRuntimeInfo(task, { ms: this.getRuntimeInfo(task).ms + ms });
-
-      toPromise(value)
-        .then(resolvedValue => {
-          // 记录 sendValue
-          this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
-
-          if (done) {
-            this.emitAll(new EVENT.Done(null, resolvedValue, task), [task]);
-          } else {
-            // 未结束的任务要重新入队列
-            this.taskQueue.unshift(task);
-
-            this.callback && this.callback(resolvedValue);
-            this.emitAll(new EVENT.Yield(resolvedValue, task), [task]);
-          }
-
-          // 调度下一个
-          cleanAndRunNext();
-        })
-        .catch(e => {
-          this.emitAll(new EVENT.Done(e, undefined, task), [task]);
-
-          // 调度下一个
-          cleanAndRunNext();
-        });
-    } catch (e) {
-      // 发生了同步错误
-      this.emitAll(new EVENT.Done(e, undefined, task), [task]);
-
-      // 调度下一个
-      cleanAndRunNext();
-    }
+    this.mergeRuntimeInfo(task, {
+      cancelSchedule: this.scheduler.schedule(runTask),
+    });
   };
 
   start() {
-    this.emitAll(new EVENT.Start(), this.taskQueue);
+    this.emitAll(new StartEvent(), this.taskQueue);
     this.runNextSlice();
     return this;
   }
 
   pause() {
     this.isPaused = true;
-    this.emitAll(new EVENT.Pause(), this.taskQueue);
+    this.emitAll(new PauseEvent(), this.taskQueue);
     return this;
   }
 
   resume() {
     this.isPaused = false;
-    this.emitAll(new EVENT.Resume(), this.taskQueue);
+    this.emitAll(new ResumeEvent(), this.taskQueue);
     this.runNextSlice();
     return this;
   }
@@ -164,7 +173,7 @@ export class TaskDriver<T = any> {
     const tasksToCancel = task ? [task] : this.taskQueue;
 
     this.resetTaskState(tasksToCancel);
-    this.emitAll(new EVENT.Cancel(), tasksToCancel);
+    this.emitAll(new CancelEvent(), tasksToCancel);
 
     // 从 taskQueue 中剔除
     this.taskQueue = this.taskQueue.filter(t => !tasksToCancel.includes(t));

@@ -10,7 +10,7 @@ import {
 
 describe('__tests__/driver.test.ts', () => {
   it('单任务', done => {
-    const i1 = (function*() {
+    const i1 = (function* () {
       yield 'x';
     })();
     const t1 = new SingleTask(i1);
@@ -32,12 +32,12 @@ describe('__tests__/driver.test.ts', () => {
   });
 
   it('driver 事件流', done => {
-    const i1 = (function*() {
+    const i1 = (function* () {
       yield '1.1';
       yield '1.2';
       return '1.3';
     })();
-    const i2 = (function*() {
+    const i2 = (function* () {
       yield '2.1';
       yield '2.2';
       return '2.3';
@@ -81,7 +81,7 @@ describe('__tests__/driver.test.ts', () => {
   });
 
   it('task 事件流', done => {
-    const i1 = (function*() {
+    const i1 = (function* () {
       yield '1.1';
       yield '1.2';
       return '1.3';
@@ -111,10 +111,10 @@ describe('__tests__/driver.test.ts', () => {
   });
 
   it('多串行任务', done => {
-    const i1 = (function*() {
+    const i1 = (function* () {
       yield 'i1';
     })();
-    const i2 = (function*() {
+    const i2 = (function* () {
       yield 'i2';
     })();
 
@@ -134,7 +134,7 @@ describe('__tests__/driver.test.ts', () => {
   });
 
   it('可以 yield 各种值', done => {
-    const i1 = (function*() {
+    const i1 = (function* () {
       yield null;
       yield undefined;
       yield 'a';
@@ -159,7 +159,7 @@ describe('__tests__/driver.test.ts', () => {
   });
 
   it('yield 可以拿到 send 的值', done => {
-    const i1 = (function*() {
+    const i1 = (function* () {
       let res: any;
 
       res = yield new Promise(resolve => setTimeout(() => resolve('1.1'), 100));
@@ -169,7 +169,7 @@ describe('__tests__/driver.test.ts', () => {
       expect(res).toEqual('1.2');
     })();
 
-    const i2 = (function*() {
+    const i2 = (function* () {
       let res: any;
 
       res = yield new Promise(resolve => setTimeout(() => resolve('2.1'), 100));
@@ -188,7 +188,7 @@ describe('__tests__/driver.test.ts', () => {
   });
 
   it('yield 可以 catch', done => {
-    const i1 = (function*() {
+    const i1 = (function* () {
       try {
         yield Promise.reject('err');
       } catch (e) {
@@ -201,15 +201,31 @@ describe('__tests__/driver.test.ts', () => {
     d.on(EVENT.Empty, () => done()).start();
   });
 
+  it('.start() 之后等待调度再开始任务', done => {
+    let flag = 'init';
+
+    const i1 = (function* () {
+      flag = 'run i1';
+      yield 'x';
+    })();
+    const t1 = new SingleTask(i1);
+    const d = new TaskDriver(t1, new TimeoutScheduler());
+
+    d.on(EVENT.Done, () => done()).start();
+
+    // .start() 之后，flag 依然是 `init`，表示没有执行过 i1
+    expect(flag).toBe('init');
+  });
+
   describe('优先级任务', () => {
     it('priority 调度', done => {
-      const i1 = (function*() {
+      const i1 = (function* () {
         yield 'i1';
       })();
-      const i2 = (function*() {
+      const i2 = (function* () {
         yield 'i2';
       })();
-      const i3 = (function*() {
+      const i3 = (function* () {
         yield 'i3';
       })();
 
@@ -231,11 +247,11 @@ describe('__tests__/driver.test.ts', () => {
     });
 
     it('runtime ms 调度', done => {
-      const i1 = (function*() {
+      const i1 = (function* () {
         yield 'i1.1';
         yield 'i1.2';
       })();
-      const i2 = (function*() {
+      const i2 = (function* () {
         for (let i = 0; i < 1e8; i++) {}
         yield 'i2.1';
         yield 'i2.2';
@@ -264,11 +280,11 @@ describe('__tests__/driver.test.ts', () => {
     });
 
     it('动态 priority', done => {
-      const i1 = (function*() {
+      const i1 = (function* () {
         yield 'i1.1';
         yield 'i1.2';
       })();
-      const i2 = (function*() {
+      const i2 = (function* () {
         yield 'i2.1';
         yield 'i2.2';
       })();
@@ -302,14 +318,14 @@ describe('__tests__/driver.test.ts', () => {
       const invokeErrorEvents: DoneEvent[] = [];
 
       // 同步栈
-      const i1 = (function*() {
+      const i1 = (function* () {
         invokeCnt.i1++;
         yield 1;
         throw new Error('fake error1');
       })();
 
       // 异步栈
-      const i2 = (function*() {
+      const i2 = (function* () {
         invokeCnt.i2++;
         yield new Promise((_, reject) => {
           setTimeout(() => reject(new Error('fake error2')), 0);
@@ -317,7 +333,7 @@ describe('__tests__/driver.test.ts', () => {
       })();
 
       // 正常任务
-      const i3 = (function*() {
+      const i3 = (function* () {
         yield invokeCnt.i3++;
         yield invokeCnt.i3++;
       })();
