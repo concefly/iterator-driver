@@ -362,4 +362,32 @@ describe('__tests__/driver.test.ts', () => {
         .start();
     });
   });
+
+  describe('配置项', () => {
+    it('autoStart', done => {
+      let startCnt = 0;
+      let flag = 'init';
+
+      const i1 = (function* () {
+        yield 'x';
+        flag = 'i1';
+      })();
+
+      const i2 = (function* () {
+        yield 'x';
+        flag = 'i2';
+      })();
+
+      const d = new TaskDriver([], new TimeoutScheduler(), null, { autoStart: true })
+        .on(EVENT.Start, () => startCnt++)
+        .on(EVENT.Done, () => {
+          expect(flag).toBe('i1');
+          expect(startCnt).toBe(1);
+          done();
+        });
+
+      d.addTask(i1);
+      d.addTask(i2);
+    });
+  });
 });

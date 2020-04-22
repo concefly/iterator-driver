@@ -26,14 +26,20 @@ export class TaskDriver<T = any> {
   protected taskRuntimeInfo = new WeakMap<BaseTask<T>, ITaskRuntimeInfo>();
   protected eventBus = new EventBus();
   protected isPaused = false;
+  protected isEmpty = true;
 
   constructor(
     task: BaseTask<T>[] | BaseTask<T>,
     protected readonly scheduler: BaseScheduler,
-    protected readonly callback?: (value: T) => void
+    protected readonly callback?: (value: T) => void,
+    protected readonly config?: {
+      /** 添加任务时自动启动 */
+      autoStart?: boolean;
+    }
   ) {
     // 初始化任务队列
     this.taskQueue = Array.isArray(task) ? [...task] : [task];
+    this.isEmpty = this.taskQueue.length === 0;
 
     ensureUnique(this.taskQueue, 'name');
   }
@@ -91,14 +97,18 @@ export class TaskDriver<T = any> {
     };
   }
 
+  /** 会等待调度再执行 */
   protected runNextSlice = () => {
     if (this.isPaused) return;
 
     // 任务队列空 -> 结束当前 slice
     if (this.taskQueue.length === 0) {
       this.emitAll(new EmptyEvent(), []);
+      this.isEmpty = true;
       return;
     }
+
+    this.isEmpty = false;
 
     this.sortTaskQueue();
     const task = this.taskQueue.pop();
@@ -186,6 +196,8 @@ export class TaskDriver<T = any> {
     this.taskQueue.unshift(_task);
 
     ensureUnique(this.taskQueue, 'name');
+
+    if (this.config?.autoStart && this.isEmpty) this.start();
 
     return this;
   }
