@@ -27,6 +27,7 @@ export class TaskDriver<T = any> {
   protected eventBus = new EventBus();
   protected isPaused = false;
   protected isEmpty = true;
+  protected cancelNextSliceScheduler: () => void;
 
   constructor(
     task: BaseTask<T>[] | BaseTask<T>,
@@ -97,6 +98,13 @@ export class TaskDriver<T = any> {
     };
   }
 
+  /**
+   * @override 判断当前任务应该 run or skip
+   */
+  protected shouldTaskRun(_task: BaseTask<T>): boolean {
+    return true;
+  }
+
   /** 会等待调度再执行 */
   protected runNextSlice = () => {
     if (this.isPaused) return;
@@ -112,6 +120,13 @@ export class TaskDriver<T = any> {
 
     this.sortTaskQueue();
     const task = this.taskQueue.pop();
+
+    // task 运行前检查不通过，则 skip
+    if (!this.shouldTaskRun(task)) {
+      this.taskQueue.unshift(task);
+      this.cancelNextSliceScheduler = this.scheduler.schedule(this.runNextSlice);
+      return;
+    }
 
     const runTask = () => {
       const { sendValue } = this.getRuntimeInfo(task);
@@ -180,6 +195,8 @@ export class TaskDriver<T = any> {
   }
 
   cancel(task?: BaseTask<T>) {
+    this.cancelNextSliceScheduler && this.cancelNextSliceScheduler();
+
     const tasksToCancel = task ? [task] : this.taskQueue;
 
     this.resetTaskState(tasksToCancel);

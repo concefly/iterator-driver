@@ -6,6 +6,7 @@ import {
   SerialTask,
   DoneEvent,
   EmptyEvent,
+  BaseTask,
 } from '../src';
 
 describe('__tests__/driver.test.ts', () => {
@@ -215,6 +216,46 @@ describe('__tests__/driver.test.ts', () => {
 
     // .start() 之后，flag 依然是 `init`，表示没有执行过 i1
     expect(flag).toBe('init');
+  });
+
+  it('shouldTaskRun test', done => {
+    let cnt = 0;
+
+    class TestTaskDriver extends TaskDriver {
+      shouldTaskRun(task: BaseTask) {
+        if (cnt++ < 5) {
+          return task.name !== 'skip';
+        }
+        this.cancel();
+      }
+    }
+
+    const flag: string[] = [];
+
+    const t1 = new SingleTask(
+      (function* () {
+        flag.push('i1');
+      })(),
+      1,
+      'run'
+    );
+
+    const t2 = new SingleTask(
+      (function* () {
+        flag.push('i2');
+      })(),
+      1,
+      'skip'
+    );
+
+    const d = new TestTaskDriver([t1, t2], new TimeoutScheduler(), value => {
+      expect(value).toBe('x');
+    });
+
+    d.on(EVENT.Cancel, () => {
+      expect(flag).toEqual(['i1']);
+      done();
+    }).start();
   });
 
   describe('优先级任务', () => {
