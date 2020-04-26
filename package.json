@@ -9,7 +9,7 @@
   "module": "dist/es/index.js",
   "scripts": {
     "test": "jest",
-    "ci": "npm run test",
+    "ci": "tsc -p tsconfig.build.es.json --noEmit && tsc -p tsconfig.build.json --noEmit && npm run test",
     "clean": "rm -rf dist/*",
     "build:es": "tsc -p tsconfig.build.es.json --outDir dist/es",
     "build:lib": "tsc -p tsconfig.build.json --outDir dist/lib",

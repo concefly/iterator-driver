@@ -2,10 +2,10 @@ import { EventBus, BaseEvent } from './event';
 import { getUUid } from './util';
 
 export class BaseTask<T = any> {
-  iter: IterableIterator<T> = null;
+  iter: IterableIterator<T> = (function* () {})();
   priority: number = 0;
   eventBus = new EventBus();
-  name: string;
+  name: string = '';
 
   on<T extends typeof BaseEvent>(type: T, h: (event: InstanceType<T>) => void) {
     this.eventBus.on(type, h);
@@ -38,7 +38,7 @@ export class SerialTask<T = any> extends BaseTask<T> {
 
     const self = this;
 
-    this.iter = (function*() {
+    this.iter = (function* () {
       for (const iter of self.iters) {
         for (const _ of iter) {
           yield _;
