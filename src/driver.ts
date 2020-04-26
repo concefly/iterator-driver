@@ -17,7 +17,6 @@ export type ITaskRuntimeInfo = {
   /** 运行 ms 数 */
   ms: number;
   sendValue?: any;
-  cancelSchedule?: () => void;
 };
 
 /** 创建切片任务驱动器 */
@@ -74,11 +73,6 @@ export class TaskDriver<T = any> {
   protected resetTaskState(tasks: BaseTask<T>[]) {
     tasks.forEach(task => {
       task.iter.return();
-
-      // 结束所有 task 调度器
-      const { cancelSchedule } = this.getRuntimeInfo(task);
-      cancelSchedule && cancelSchedule();
-
       this.taskRuntimeInfo.delete(task);
     });
   }
@@ -111,8 +105,8 @@ export class TaskDriver<T = any> {
 
     // 任务队列空 -> 结束当前 slice
     if (this.taskQueue.length === 0) {
-      this.emitAll(new EmptyEvent(), []);
       this.isEmpty = true;
+      this.emitAll(new EmptyEvent(), []);
       return;
     }
 
@@ -170,9 +164,7 @@ export class TaskDriver<T = any> {
       }
     };
 
-    this.mergeRuntimeInfo(task, {
-      cancelSchedule: this.scheduler.schedule(runTask),
-    });
+    this.scheduler.schedule(runTask);
   };
 
   start() {
@@ -200,10 +192,12 @@ export class TaskDriver<T = any> {
     const tasksToCancel = task ? [task] : this.taskQueue;
 
     this.resetTaskState(tasksToCancel);
-    this.emitAll(new CancelEvent(), tasksToCancel);
 
     // 从 taskQueue 中剔除
     this.taskQueue = this.taskQueue.filter(t => !tasksToCancel.includes(t));
+
+    // 抛事件
+    this.emitAll(new CancelEvent(), tasksToCancel);
 
     return this;
   }
@@ -222,6 +216,11 @@ export class TaskDriver<T = any> {
   /** 获取接下来的任务队列 */
   getTaskQueue() {
     return [...this.taskQueue];
+  }
+
+  /** 获取接下来的任务队列长度 */
+  getTaskQueueSize() {
+    return this.taskQueue.length;
   }
 
   on<E extends typeof BaseEvent>(type: E, h: (event: InstanceType<E>) => void) {

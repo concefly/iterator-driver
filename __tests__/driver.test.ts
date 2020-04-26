@@ -413,11 +413,13 @@ describe('__tests__/driver.test.ts', () => {
         yield 'x';
         flag = 'i1';
       })();
-
+      const t1 = new SingleTask(i1, 999);
+      
       const i2 = (function* () {
         yield 'x';
         flag = 'i2';
       })();
+      const t2 = new SingleTask(i2, 0);
 
       const d = new TaskDriver([], new TimeoutScheduler(), null, { autoStart: true })
         .on(EVENT.Start, () => startCnt++)
@@ -427,8 +429,8 @@ describe('__tests__/driver.test.ts', () => {
           done();
         });
 
-      d.addTask(i1);
-      d.addTask(i2);
+      d.addTask(t1);
+      d.addTask(t2);
     });
   });
 });
