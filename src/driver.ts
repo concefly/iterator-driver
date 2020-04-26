@@ -6,8 +6,9 @@ import {
   StartEvent,
   PauseEvent,
   ResumeEvent,
-  CancelEvent,
+  DropEvent,
   EmptyEvent,
+  DisposeEvent,
 } from './event';
 import { BaseTask, SingleTask } from './task';
 import { BaseScheduler } from './scheduler';
@@ -15,7 +16,7 @@ import { runtimeMs, toPromise, ensureUnique } from './util';
 
 export type ITaskRuntimeInfo = {
   /** 运行 ms 数 */
-  ms: number;
+  ms?: number;
   sendValue?: any;
 };
 
@@ -25,8 +26,8 @@ export class TaskDriver<T = any> {
   protected taskRuntimeInfo = new WeakMap<BaseTask<T>, ITaskRuntimeInfo>();
   protected eventBus = new EventBus();
   protected isPaused = false;
-  protected isEmpty = true;
-  protected cancelNextSliceScheduler: () => void;
+  protected isRunning = false;
+  protected cancelNextSliceScheduler?: () => void;
 
   constructor(
     task: BaseTask<T>[] | BaseTask<T>,
@@ -39,8 +40,6 @@ export class TaskDriver<T = any> {
   ) {
     // 初始化任务队列
     this.taskQueue = Array.isArray(task) ? [...task] : [task];
-    this.isEmpty = this.taskQueue.length === 0;
-
     ensureUnique(this.taskQueue, 'name');
   }
 
@@ -61,19 +60,12 @@ export class TaskDriver<T = any> {
         a.priority - b.priority ||
         // 运行时间排序
         (() => {
-          const aMs = this.getRuntimeInfo(a).ms;
-          const bMs = this.getRuntimeInfo(b).ms;
+          const aMs = this.getRuntimeInfo(a).ms || 0;
+          const bMs = this.getRuntimeInfo(b).ms || 0;
           // 耗时越长，优先级约低
           return bMs - aMs;
         })()
       );
-    });
-  }
-
-  protected resetTaskState(tasks: BaseTask<T>[]) {
-    tasks.forEach(task => {
-      task.iter.return();
-      this.taskRuntimeInfo.delete(task);
     });
   }
 
@@ -93,33 +85,45 @@ export class TaskDriver<T = any> {
   }
 
   /**
+   * @override 判断是否要进行此次调度
+   */
+  protected shouldRunCallLoop(): boolean {
+    return true;
+  }
+
+  /**
    * @override 判断当前任务应该 run or skip
    */
   protected shouldTaskRun(_task: BaseTask<T>): boolean {
     return true;
   }
 
-  /** 会等待调度再执行 */
-  protected runNextSlice = () => {
-    if (this.isPaused) return;
+  protected callLoop = (): void => {
+    const setCleanerThenScheduleNext = (fn: () => void) => {
+      this.cancelNextSliceScheduler = this.scheduler.schedule(fn);
+    };
 
-    // 任务队列空 -> 结束当前 slice
-    if (this.taskQueue.length === 0) {
-      this.isEmpty = true;
+    // 判断是否暂停中
+    if (this.isPaused) return setCleanerThenScheduleNext(this.callLoop);
+
+    // 自定义检查
+    if (!this.shouldRunCallLoop()) return setCleanerThenScheduleNext(this.callLoop);
+
+    // 取出优先级最高的任务
+    this.sortTaskQueue();
+    const task = this.taskQueue.pop();
+
+    // 任务队列空了，退出
+    if (!task) {
+      this.isRunning = false;
       this.emitAll(new EmptyEvent(), []);
       return;
     }
 
-    this.isEmpty = false;
-
-    this.sortTaskQueue();
-    const task = this.taskQueue.pop();
-
     // task 运行前检查不通过，则 skip
     if (!this.shouldTaskRun(task)) {
       this.taskQueue.unshift(task);
-      this.cancelNextSliceScheduler = this.scheduler.schedule(this.runNextSlice);
-      return;
+      return setCleanerThenScheduleNext(this.callLoop);
     }
 
     const runTask = () => {
@@ -129,7 +133,7 @@ export class TaskDriver<T = any> {
         const [{ value, done }, ms] = runtimeMs(() => task.iter.next(sendValue));
 
         // 累加运行时间
-        this.mergeRuntimeInfo(task, { ms: this.getRuntimeInfo(task).ms + ms });
+        this.mergeRuntimeInfo(task, { ms: (this.getRuntimeInfo(task).ms || 0) + ms });
 
         toPromise(value)
           .then(resolvedValue => {
@@ -147,29 +151,34 @@ export class TaskDriver<T = any> {
             }
 
             // 调度下一个
-            this.runNextSlice();
+            this.callLoop();
           })
           .catch(e => {
             this.emitAll(new DoneEvent(e, undefined, task), [task]);
 
             // 调度下一个
-            this.runNextSlice();
+            this.callLoop();
           });
       } catch (e) {
         // 发生了同步错误
         this.emitAll(new DoneEvent(e, undefined, task), [task]);
 
         // 调度下一个
-        this.runNextSlice();
+        this.callLoop();
       }
     };
 
-    this.scheduler.schedule(runTask);
+    setCleanerThenScheduleNext(runTask);
   };
 
   start() {
+    if (this.isRunning) return this;
+
+    this.isRunning = true;
     this.emitAll(new StartEvent(), this.taskQueue);
-    this.runNextSlice();
+
+    this.callLoop();
+
     return this;
   }
 
@@ -182,24 +191,40 @@ export class TaskDriver<T = any> {
   resume() {
     this.isPaused = false;
     this.emitAll(new ResumeEvent(), this.taskQueue);
-    this.runNextSlice();
     return this;
   }
 
-  cancel(task?: BaseTask<T>) {
-    this.cancelNextSliceScheduler && this.cancelNextSliceScheduler();
-
-    const tasksToCancel = task ? [task] : this.taskQueue;
-
-    this.resetTaskState(tasksToCancel);
+  drop(tasks: BaseTask<T>[]) {
+    // 结束任务
+    tasks.forEach(task => {
+      task.iter.return && task.iter.return();
+      this.taskRuntimeInfo.delete(task);
+    });
 
     // 从 taskQueue 中剔除
-    this.taskQueue = this.taskQueue.filter(t => !tasksToCancel.includes(t));
+    this.taskQueue = this.taskQueue.filter(t => !tasks.includes(t));
 
     // 抛事件
-    this.emitAll(new CancelEvent(), tasksToCancel);
-
+    this.emitAll(new DropEvent(tasks), tasks);
     return this;
+  }
+
+  /**
+   * 销毁
+   * - 清理各种定时器
+   * - 重置状态
+   */
+  dispose() {
+    // 卸掉所有任务
+    this.drop(this.taskQueue);
+
+    this.cancelNextSliceScheduler && this.cancelNextSliceScheduler();
+    this.isRunning = false;
+    this.isPaused = false;
+
+    // 先发一个事件，然后把事件总线关掉
+    this.emitAll(new DisposeEvent(), []);
+    this.eventBus.off();
   }
 
   addTask(task: BaseTask<T> | IterableIterator<T>) {
@@ -208,7 +233,7 @@ export class TaskDriver<T = any> {
 
     ensureUnique(this.taskQueue, 'name');
 
-    if (this.config?.autoStart && this.isEmpty) this.start();
+    if (this.config?.autoStart) this.start();
 
     return this;
   }

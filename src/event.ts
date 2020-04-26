@@ -24,7 +24,7 @@ export class YieldEvent extends BaseEvent {
 /** 某个 iterator 结束 */
 export class DoneEvent extends BaseEvent {
   static displayName = 'Done';
-  constructor(public error: Error, public value: any, public readonly task: BaseTask<any>) {
+  constructor(public error: Error | null, public value: any, public readonly task: BaseTask<any>) {
     super();
   }
 }
@@ -34,9 +34,13 @@ export class EmptyEvent extends BaseEvent {
   static displayName = 'Empty';
 }
 
-/** 取消 */
-export class CancelEvent extends BaseEvent {
-  static displayName = 'Cancel';
+/** 卸载任务 */
+export class DropEvent extends BaseEvent {
+  static displayName = 'drop';
+
+  constructor(public readonly tasks: BaseTask<any>[]) {
+    super();
+  }
 }
 
 /** 暂停 */
@@ -49,16 +53,10 @@ export class ResumeEvent extends BaseEvent {
   static displayName = 'Resume';
 }
 
-/** 全局要用的 event */
-export const EVENT = {
-  Start: StartEvent,
-  Yield: YieldEvent,
-  Done: DoneEvent,
-  Empty: EmptyEvent,
-  Cancel: CancelEvent,
-  Pause: PauseEvent,
-  Resume: ResumeEvent,
-};
+/** 销毁 */
+export class DisposeEvent extends BaseEvent {
+  static displayName = 'dispose';
+}
 
 export class EventBus {
   private handleMap = new Map<BaseEvent, Function[]>();
