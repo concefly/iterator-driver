@@ -209,6 +209,22 @@ export class TaskDriver<T = any> {
     return this;
   }
 
+  dropAll() {
+    const tasks = this.taskQueue;
+
+    // 结束任务
+    tasks.forEach(task => {
+      task.iter.return && task.iter.return();
+      this.taskRuntimeInfo.delete(task);
+    });
+
+    this.taskQueue = [];
+
+    // 抛事件
+    this.emitAll(new DropEvent(tasks), tasks);
+    return this;
+  }
+
   /**
    * 销毁
    * - 清理各种定时器
