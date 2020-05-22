@@ -10,7 +10,7 @@ import {
   EmptyEvent,
   DisposeEvent,
 } from './event';
-import { BaseTask, SingleTask } from './task';
+import { BaseTask } from './task';
 import { BaseScheduler } from './scheduler';
 import { runtimeMs, toPromise, ensureUnique } from './util';
 
@@ -21,16 +21,16 @@ export type ITaskRuntimeInfo = {
 };
 
 /** 创建切片任务驱动器 */
-export class TaskDriver<T = any> {
-  protected taskQueue: BaseTask<T>[] = [];
-  protected taskRuntimeInfo = new WeakMap<BaseTask<T>, ITaskRuntimeInfo>();
+export class TaskDriver<T extends BaseTask = BaseTask> {
+  protected taskQueue: T[] = [];
+  protected taskRuntimeInfo = new WeakMap<T, ITaskRuntimeInfo>();
   protected eventBus = new EventBus();
   protected isPaused = false;
   protected isRunning = false;
   protected cancelNextSliceScheduler?: () => void;
 
   constructor(
-    task: BaseTask<T>[] | BaseTask<T>,
+    task: T[] | T,
     protected readonly scheduler: BaseScheduler,
     protected readonly callback?: (value: T) => void,
     protected readonly config?: {
@@ -43,7 +43,7 @@ export class TaskDriver<T = any> {
     ensureUnique(this.taskQueue, 'name');
   }
 
-  protected emitAll<E extends BaseEvent>(event: E, tasks: BaseTask<T>[]) {
+  protected emitAll<E extends BaseEvent>(event: E, tasks: T[]) {
     // 给自己 emit
     this.eventBus.emit(event);
     // 给 task emit
@@ -71,14 +71,14 @@ export class TaskDriver<T = any> {
     });
   }
 
-  protected mergeRuntimeInfo(task: BaseTask<T>, info: Partial<ITaskRuntimeInfo>) {
+  protected mergeRuntimeInfo(task: T, info: Partial<ITaskRuntimeInfo>) {
     this.taskRuntimeInfo.set(task, {
       ...this.taskRuntimeInfo.get(task),
       ...info,
     });
   }
 
-  protected getRuntimeInfo(task: BaseTask<T>): ITaskRuntimeInfo {
+  protected getRuntimeInfo(task: T): ITaskRuntimeInfo {
     return {
       ms: 0,
       sendValue: undefined,
@@ -96,7 +96,7 @@ export class TaskDriver<T = any> {
   /**
    * @override 判断当前任务应该 run or skip
    */
-  protected shouldTaskRun(_task: BaseTask<T>): boolean {
+  protected shouldTaskRun(_task: T): boolean {
     return true;
   }
 
@@ -196,7 +196,7 @@ export class TaskDriver<T = any> {
     return this;
   }
 
-  drop(tasks: BaseTask<T>[]) {
+  drop(tasks: T[]) {
     // 结束任务
     tasks.forEach(task => {
       task.iter.return && task.iter.return();
@@ -245,9 +245,8 @@ export class TaskDriver<T = any> {
     this.eventBus.off();
   }
 
-  addTask(task: BaseTask<T> | IterableIterator<T>) {
-    const _task = task instanceof BaseTask ? task : new SingleTask(task);
-    this.taskQueue.unshift(_task);
+  addTask(task: T) {
+    this.taskQueue.unshift(task);
 
     ensureUnique(this.taskQueue, 'name');
 

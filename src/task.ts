@@ -1,12 +1,38 @@
 import { EventBus, BaseEvent } from './event';
 import { getUUid } from './util';
 
+type ITaskInitProps<T> = {
+  readonly iter: IterableIterator<T>;
+  priority?: number;
+  minorPriority?: number;
+};
+
 export class BaseTask<T = any> {
-  iter: IterableIterator<T> = (function* () {})();
-  priority: number = 0;
-  minorPriority: number = 0;
   eventBus = new EventBus();
-  name: string = '';
+  constructor(
+    private readonly data: ITaskInitProps<T>,
+    readonly name: string = getUUid('BaseTask-')
+  ) {}
+
+  get iter() {
+    return this.data.iter;
+  }
+
+  get priority() {
+    return this.data.priority || 0;
+  }
+
+  set priority(p: number) {
+    this.data.priority = p;
+  }
+
+  get minorPriority() {
+    return this.data.minorPriority || 0;
+  }
+
+  set minorPriority(p: number) {
+    this.data.minorPriority = p;
+  }
 
   on<T extends typeof BaseEvent>(type: T, h: (event: InstanceType<T>) => void) {
     this.eventBus.on(type, h);
@@ -16,35 +42,5 @@ export class BaseTask<T = any> {
   off<T extends typeof BaseEvent>(type?: T, h?: Function) {
     this.eventBus.off(type, h);
     return this;
-  }
-}
-
-export class SingleTask<T = any> extends BaseTask<T> {
-  constructor(
-    readonly iter: IterableIterator<T>,
-    public priority: number = 0,
-    public readonly name: string = getUUid('SingleTask-')
-  ) {
-    super();
-  }
-}
-
-export class SerialTask<T = any> extends BaseTask<T> {
-  constructor(
-    private readonly iters: IterableIterator<T>[],
-    public priority: number = 0,
-    public readonly name: string = getUUid('SerialTask-')
-  ) {
-    super();
-
-    const self = this;
-
-    this.iter = (function* () {
-      for (const iter of self.iters) {
-        for (const _ of iter) {
-          yield _;
-        }
-      }
-    })();
   }
 }

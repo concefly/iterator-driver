@@ -8,7 +8,7 @@ Array [
   "DoneEvent-1.3-null",
   "YieldEvent-2.1",
   "YieldEvent-2.2",
-  "DropEvent-SingleTask-2",
+  "DropEvent-BaseTask-2",
   "EmptyEvent",
   "DropEvent-",
   "DisposeEvent",

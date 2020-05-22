@@ -1,8 +1,6 @@
 import {
-  SingleTask,
   TaskDriver,
   TimeoutScheduler,
-  SerialTask,
   DoneEvent,
   EmptyEvent,
   BaseTask,
@@ -17,7 +15,7 @@ describe('__tests__/driver.test.ts', () => {
     const i1 = (function* () {
       yield 'x';
     })();
-    const t1 = new SingleTask(i1);
+    const t1 = new BaseTask({ iter: i1 });
 
     const d = new TaskDriver(t1, new TimeoutScheduler(), value => {
       expect(value).toBe('x');
@@ -46,8 +44,8 @@ describe('__tests__/driver.test.ts', () => {
       yield '2.2';
       return '2.3';
     })();
-    const t1 = new SingleTask(i1, 2);
-    const t2 = new SingleTask(i2, 1);
+    const t1 = new BaseTask({ iter: i1, priority: 2 });
+    const t2 = new BaseTask({ iter: i2, priority: 1 });
 
     const driver = new TaskDriver([t1, t2], new TimeoutScheduler());
 
@@ -88,7 +86,7 @@ describe('__tests__/driver.test.ts', () => {
       Done: 0,
     };
 
-    const t1 = new SingleTask(i1)
+    const t1 = new BaseTask({ iter: i1 })
       .on(StartEvent, () => t1Flag.Start++)
       .on(YieldEvent, () => t1Flag.Yield++)
       .on(DoneEvent, () => t1Flag.Done++);
@@ -105,29 +103,6 @@ describe('__tests__/driver.test.ts', () => {
     }).start();
   });
 
-  it('多串行任务', done => {
-    const i1 = (function* () {
-      yield 'i1';
-    })();
-    const i2 = (function* () {
-      yield 'i2';
-    })();
-
-    const t1 = new SerialTask([i1, i2]);
-
-    let cnt = 0;
-    const d = new TaskDriver(t1, new TimeoutScheduler(), value => {
-      cnt++;
-      expect(value).toBe(`i${cnt}`);
-    });
-
-    d.on(EmptyEvent, () => {
-      done();
-    });
-
-    d.start();
-  });
-
   it('可以 yield 各种值', done => {
     const i1 = (function* () {
       yield null;
@@ -137,7 +112,7 @@ describe('__tests__/driver.test.ts', () => {
       yield [1, new Promise(resolve => setTimeout(() => resolve('1.1'), 100))];
       yield { c: 'c' };
     })();
-    const t1 = new SingleTask(i1);
+    const t1 = new BaseTask({ iter: i1 });
 
     let cnt = 0;
     const d = new TaskDriver(t1, new TimeoutScheduler(), value => {
@@ -174,8 +149,8 @@ describe('__tests__/driver.test.ts', () => {
       expect(res).toEqual('2.2');
     })();
 
-    const t1 = new SingleTask(i1);
-    const t2 = new SingleTask(i2);
+    const t1 = new BaseTask({ iter: i1 });
+    const t2 = new BaseTask({ iter: i2 });
 
     const d = new TaskDriver([t1, t2], new TimeoutScheduler());
 
@@ -190,7 +165,7 @@ describe('__tests__/driver.test.ts', () => {
         expect(e).toEqual('err');
       }
     })();
-    const t1 = new SingleTask(i1);
+    const t1 = new BaseTask({ iter: i1 });
 
     const d = new TaskDriver(t1, new TimeoutScheduler(), () => {});
     d.on(EmptyEvent, () => done()).start();
@@ -203,7 +178,7 @@ describe('__tests__/driver.test.ts', () => {
       flag = 'run i1';
       yield 'x';
     })();
-    const t1 = new SingleTask(i1);
+    const t1 = new BaseTask({ iter: i1 });
     const d = new TaskDriver(t1, new TimeoutScheduler());
 
     d.on(DoneEvent, () => done()).start();
@@ -227,19 +202,23 @@ describe('__tests__/driver.test.ts', () => {
 
     const flag: string[] = [];
 
-    const t1 = new SingleTask(
-      (function* () {
-        flag.push('i1');
-      })(),
-      1,
+    const t1 = new BaseTask(
+      {
+        iter: (function* () {
+          flag.push('i1');
+        })(),
+        priority: 1,
+      },
       'run'
     );
 
-    const t2 = new SingleTask(
-      (function* () {
-        flag.push('i2');
-      })(),
-      1,
+    const t2 = new BaseTask(
+      {
+        iter: (function* () {
+          flag.push('i2');
+        })(),
+        priority: 1,
+      },
       'skip'
     );
 
@@ -265,9 +244,9 @@ describe('__tests__/driver.test.ts', () => {
         yield 'i3';
       })();
 
-      const t1 = new SingleTask(i1, 1);
-      const t2 = new SingleTask(i2, 2);
-      const t3 = new SingleTask(i3, 3);
+      const t1 = new BaseTask({ iter: i1, priority: 1 });
+      const t2 = new BaseTask({ iter: i2, priority: 2 });
+      const t3 = new BaseTask({ iter: i3, priority: 3 });
 
       let cnt = 3;
       const d = new TaskDriver([t1, t3, t2], new TimeoutScheduler(), value => {
@@ -293,8 +272,8 @@ describe('__tests__/driver.test.ts', () => {
         yield 'i2.2';
       })();
 
-      const t1 = new SingleTask(i1);
-      const t2 = new SingleTask(i2);
+      const t1 = new BaseTask({ iter: i1 });
+      const t2 = new BaseTask({ iter: i2 });
 
       let cnt = 0;
       const d = new TaskDriver([t1, t2], new TimeoutScheduler(), value => {
@@ -325,8 +304,8 @@ describe('__tests__/driver.test.ts', () => {
         yield 'i2.2';
       })();
 
-      const t1 = new SingleTask(i1);
-      const t2 = new SingleTask(i2, 1);
+      const t1 = new BaseTask({ iter: i1 });
+      const t2 = new BaseTask({ iter: i2, priority: 1 });
 
       let cnt = 0;
       const d = new TaskDriver([t1, t2], new TimeoutScheduler(), value => {
@@ -374,9 +353,9 @@ describe('__tests__/driver.test.ts', () => {
         yield invokeCnt.i3++;
       })();
 
-      const t1 = new SingleTask<any>(i1, 10);
-      const t2 = new SingleTask<any>(i2);
-      const t3 = new SingleTask<any>(i3);
+      const t1 = new BaseTask<any>({ iter: i1, priority: 10 });
+      const t2 = new BaseTask<any>({ iter: i2 });
+      const t3 = new BaseTask<any>({ iter: i3 });
 
       new TaskDriver([t1, t2, t3], new TimeoutScheduler())
         .on(DoneEvent, e => {
@@ -408,15 +387,15 @@ describe('__tests__/driver.test.ts', () => {
         yield 'x';
         flag = 'i1';
       })();
-      const t1 = new SingleTask(i1, 999);
+      const t1 = new BaseTask({ iter: i1, priority: 999 });
 
       const i2 = (function* () {
         yield 'x';
         flag = 'i2';
       })();
-      const t2 = new SingleTask(i2, 0);
+      const t2 = new BaseTask({ iter: i2, priority: 0 });
 
-      const d = new TaskDriver([], new TimeoutScheduler(), undefined, { autoStart: true })
+      const d = new TaskDriver<BaseTask>([], new TimeoutScheduler(), undefined, { autoStart: true })
         .on(StartEvent, () => startCnt++)
         .on(DoneEvent, () => {
           expect(flag).toBe('i1');
