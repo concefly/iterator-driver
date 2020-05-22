@@ -58,6 +58,8 @@ export class TaskDriver<T = any> {
       return (
         // 优先级排序
         a.priority - b.priority ||
+        // 次优先级排序
+        a.minorPriority - b.minorPriority ||
         // 运行时间排序
         (() => {
           const aMs = this.getRuntimeInfo(a).ms || 0;

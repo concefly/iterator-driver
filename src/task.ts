@@ -4,6 +4,7 @@ import { getUUid } from './util';
 export class BaseTask<T = any> {
   iter: IterableIterator<T> = (function* () {})();
   priority: number = 0;
+  minorPriority: number = 0;
   eventBus = new EventBus();
   name: string = '';
 
