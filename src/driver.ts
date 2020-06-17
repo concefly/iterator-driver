@@ -23,6 +23,7 @@ export type ITaskRuntimeInfo = {
 /** 创建切片任务驱动器 */
 export class TaskDriver<T extends BaseTask = BaseTask> {
   protected taskQueue: T[] = [];
+  protected pendingTask?: T;
   protected taskRuntimeInfo = new WeakMap<T, ITaskRuntimeInfo>();
   protected eventBus = new EventBus();
   protected isPaused = false;
@@ -100,6 +101,18 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     return true;
   }
 
+  protected popTaskQueue(): T | undefined {
+    // 先按优先级排序
+    this.sortTaskQueue();
+
+    return (this.pendingTask = this.taskQueue.pop());
+  }
+
+  protected unshiftTaskQueue(task: T) {
+    if (task === this.pendingTask) this.pendingTask = undefined;
+    this.taskQueue.unshift(task);
+  }
+
   protected callLoop = (): void => {
     const setCleanerThenScheduleNext = (fn: () => void) => {
       this.cancelNextSliceScheduler = this.scheduler.schedule(fn);
@@ -112,8 +125,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     if (!this.shouldRunCallLoop()) return setCleanerThenScheduleNext(this.callLoop);
 
     // 取出优先级最高的任务
-    this.sortTaskQueue();
-    const task = this.taskQueue.pop();
+    const task = this.popTaskQueue();
 
     // 任务队列空了，退出
     if (!task) {
@@ -124,7 +136,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
 
     // task 运行前检查不通过，则 skip
     if (!this.shouldTaskRun(task)) {
-      this.taskQueue.unshift(task);
+      this.unshiftTaskQueue(task);
       return setCleanerThenScheduleNext(this.callLoop);
     }
 
@@ -146,7 +158,8 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
               this.emitAll(new DoneEvent(null, resolvedValue, task), [task]);
             } else {
               // 未结束的任务要重新入队列
-              this.taskQueue.unshift(task);
+              // 调用 .drop() 的时候会清空 pendingTask，表示废弃任务，不要重新入队列
+              if (this.pendingTask === task) this.unshiftTaskQueue(task);
 
               this.callback && this.callback(resolvedValue);
               this.emitAll(new YieldEvent(resolvedValue, task), [task]);
@@ -199,12 +212,16 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   drop(tasks: T[]) {
     // 结束任务
     tasks.forEach(task => {
-      task.iter.return && task.iter.return();
+      task !== this.pendingTask && task.iter.return && task.iter.return();
       this.taskRuntimeInfo.delete(task);
     });
 
     // 从 taskQueue 中剔除
     this.taskQueue = this.taskQueue.filter(t => !tasks.includes(t));
+
+    if (this.pendingTask && tasks.includes(this.pendingTask)) {
+      this.pendingTask = undefined;
+    }
 
     // 抛事件
     this.emitAll(new DropEvent(tasks), tasks);
@@ -212,15 +229,16 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   dropAll() {
-    const tasks = this.taskQueue;
+    const tasks = this.getUnFinishTaskQueue();
 
     // 结束任务
-    tasks.forEach(task => {
-      task.iter.return && task.iter.return();
+    this.taskQueue.forEach(task => {
+      task !== this.pendingTask && task.iter.return && task.iter.return();
       this.taskRuntimeInfo.delete(task);
     });
 
     this.taskQueue = [];
+    this.pendingTask = undefined;
 
     // 抛事件
     this.emitAll(new DropEvent(tasks), tasks);
@@ -234,7 +252,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
    */
   dispose() {
     // 卸掉所有任务
-    this.drop(this.taskQueue);
+    this.dropAll();
 
     this.cancelNextSliceScheduler && this.cancelNextSliceScheduler();
     this.isRunning = false;
@@ -246,8 +264,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   addTask(task: T) {
-    this.taskQueue.unshift(task);
-
+    this.unshiftTaskQueue(task);
     ensureUnique(this.taskQueue, 'name');
 
     if (this.config?.autoStart) this.start();
@@ -255,9 +272,14 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     return this;
   }
 
-  /** 获取接下来的任务队列 */
+  /** 获取接下来的任务队列(不包含 pending 状态的队列) */
   getTaskQueue() {
     return [...this.taskQueue];
+  }
+
+  /** 获取未完成的任务队列 */
+  getUnFinishTaskQueue() {
+    return this.pendingTask ? [...this.getTaskQueue(), this.pendingTask] : this.getTaskQueue();
   }
 
   /** 获取接下来的任务队列长度 */
