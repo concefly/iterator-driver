@@ -17,7 +17,7 @@ describe('__tests__/driver.test.ts', () => {
     })();
     const t1 = new BaseTask({ iter: i1 });
 
-    const d = new TaskDriver(t1, new TimeoutScheduler(), value => {
+    const d = new TaskDriver([t1], new TimeoutScheduler(), value => {
       expect(value).toBe('x');
     });
 
@@ -44,8 +44,8 @@ describe('__tests__/driver.test.ts', () => {
       yield '2.2';
       return '2.3';
     })();
-    const t1 = new BaseTask({ iter: i1, priority: 2 });
-    const t2 = new BaseTask({ iter: i2, priority: 1 });
+    const t1 = new BaseTask({ iter: i1, priority: 2 }, 'BaseTask-1');
+    const t2 = new BaseTask({ iter: i2, priority: 1 }, 'BaseTask-2');
 
     const driver = new TaskDriver([t1, t2], new TimeoutScheduler());
 
@@ -115,7 +115,7 @@ describe('__tests__/driver.test.ts', () => {
     const t1 = new BaseTask({ iter: i1 });
 
     let cnt = 0;
-    const d = new TaskDriver(t1, new TimeoutScheduler(), value => {
+    const d = new TaskDriver([t1], new TimeoutScheduler(), value => {
       cnt++;
       cnt === 1 && expect(value).toBeNull();
       cnt === 2 && expect(value).toBeUndefined();
@@ -167,7 +167,7 @@ describe('__tests__/driver.test.ts', () => {
     })();
     const t1 = new BaseTask({ iter: i1 });
 
-    const d = new TaskDriver(t1, new TimeoutScheduler(), () => {});
+    const d = new TaskDriver([t1], new TimeoutScheduler(), () => {});
     d.on(EmptyEvent, () => done()).start();
   });
 
@@ -179,7 +179,7 @@ describe('__tests__/driver.test.ts', () => {
       yield 'x';
     })();
     const t1 = new BaseTask({ iter: i1 });
-    const d = new TaskDriver(t1, new TimeoutScheduler());
+    const d = new TaskDriver([t1], new TimeoutScheduler());
 
     d.on(DoneEvent, () => done()).start();
 
@@ -188,15 +188,10 @@ describe('__tests__/driver.test.ts', () => {
   });
 
   it('shouldTaskRun test', done => {
-    let cnt = 0;
-
     class TestTaskDriver extends TaskDriver {
       shouldTaskRun(task: BaseTask) {
-        if (cnt++ < 5) {
-          return task.name !== 'skip';
-        }
-        this.dispose();
-        return false;
+        if (task.name === 'skip') return false;
+        else return true;
       }
     }
 
@@ -205,7 +200,11 @@ describe('__tests__/driver.test.ts', () => {
     const t1 = new BaseTask(
       {
         iter: (function* () {
-          flag.push('i1');
+          let cnt = 3;
+          while (cnt--) {
+            flag.push('i1');
+            yield;
+          }
         })(),
         priority: 1,
       },
@@ -215,19 +214,21 @@ describe('__tests__/driver.test.ts', () => {
     const t2 = new BaseTask(
       {
         iter: (function* () {
-          flag.push('i2');
+          let cnt = 3;
+          while (cnt--) {
+            flag.push('i2');
+            yield;
+          }
         })(),
         priority: 1,
       },
       'skip'
     );
 
-    const d = new TestTaskDriver([t1, t2], new TimeoutScheduler(), value => {
-      expect(value).toBe('x');
-    });
+    const d = new TestTaskDriver([t1, t2], new TimeoutScheduler());
 
-    d.on(DropEvent, () => {
-      expect(flag).toEqual(['i1']);
+    d.on(EmptyEvent, () => {
+      expect(flag).toEqual(['i1', 'i1', 'i1']);
       done();
     }).start();
   });

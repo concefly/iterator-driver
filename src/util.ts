@@ -1,5 +1,7 @@
 import { ITaskStage } from './driver';
 
+export const noop = () => {};
+
 export function runtimeMs<F extends (...args: any) => any>(fn: F): [ReturnType<F>, number] {
   const a = new Date();
   const res = fn();
