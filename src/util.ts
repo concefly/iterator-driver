@@ -1,3 +1,5 @@
+import { ITaskStage } from './driver';
+
 export function runtimeMs<F extends (...args: any) => any>(fn: F): [ReturnType<F>, number] {
   const a = new Date();
   const res = fn();
@@ -32,13 +34,6 @@ export function getUUid(prefix = '') {
   return `${prefix}${uuid++}`;
 }
 
-export function ensureUnique<T>(list: T[], by: keyof T) {
-  const t = new Set<any>();
-
-  for (const item of list) {
-    const key = item[by];
-
-    if (t.has(key)) throw new Error(`${key} 重复`);
-    t.add(key);
-  }
+export function cond<T>(spec: { [key in ITaskStage]: (ctx: T) => void }) {
+  return (key: ITaskStage, ctx: T) => spec[key](ctx);
 }

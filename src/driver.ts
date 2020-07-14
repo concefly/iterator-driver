@@ -12,26 +12,29 @@ import {
 } from './event';
 import { BaseTask } from './task';
 import { BaseScheduler } from './scheduler';
-import { runtimeMs, toPromise, ensureUnique } from './util';
+import { runtimeMs, toPromise, cond } from './util';
 
-export type ITaskRuntimeInfo = {
+export type ITaskStage = 'init' | 'prepare' | 'running' | 'error' | 'dropping' | 'dropped' | 'done';
+
+export type ITaskData<T> = {
+  task: T;
+  stage: ITaskStage;
+
   /** 运行 ms 数 */
   ms?: number;
   sendValue?: any;
+  error?: Error;
 };
 
 /** 创建切片任务驱动器 */
 export class TaskDriver<T extends BaseTask = BaseTask> {
-  protected taskQueue: T[] = [];
-  protected pendingTask?: T;
-  protected taskRuntimeInfo = new WeakMap<T, ITaskRuntimeInfo>();
+  protected taskPool = new Map<string, ITaskData<T>>();
   protected eventBus = new EventBus();
   protected isPaused = false;
-  protected isRunning = false;
   protected cancelNextSliceScheduler?: () => void;
 
   constructor(
-    task: T[] | T,
+    tasks: T[],
     protected readonly scheduler: BaseScheduler,
     protected readonly callback?: (value: T) => void,
     protected readonly config?: {
@@ -39,12 +42,22 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
       autoStart?: boolean;
     }
   ) {
-    // 初始化任务队列
-    this.taskQueue = Array.isArray(task) ? [...task] : [task];
-    ensureUnique(this.taskQueue, 'name');
+    // 初始化任务池
+    this.taskPool = new Map(
+      tasks.map(task => [
+        task.name,
+        {
+          task,
+          stage: 'init',
+        } as ITaskData<T>,
+      ])
+    );
   }
 
-  protected emitAll<E extends BaseEvent>(event: E, tasks: T[]) {
+  protected emitAll<E extends BaseEvent>(
+    event: E,
+    tasks: T[] = [...this.taskPool.values()].map(d => d.task)
+  ) {
     // 给自己 emit
     this.eventBus.emit(event);
     // 给 task emit
@@ -53,38 +66,29 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     }
   }
 
-  /** 优先级大的排后面 */
-  protected sortTaskQueue() {
-    this.taskQueue.sort((a, b) => {
+  protected pickTaskData(): ITaskData<T> | undefined {
+    const tasks = [...this.taskPool.values()];
+
+    // 优先级大的排后面
+    tasks.sort((a, b) => {
       return (
         // 优先级排序
-        a.priority - b.priority ||
+        a.task.priority - b.task.priority ||
         // 次优先级排序
-        a.minorPriority - b.minorPriority ||
+        a.task.minorPriority - b.task.minorPriority ||
         // 运行时间排序
         (() => {
-          const aMs = this.getRuntimeInfo(a).ms || 0;
-          const bMs = this.getRuntimeInfo(b).ms || 0;
+          const aMs = a.ms || 0;
+          const bMs = b.ms || 0;
           // 耗时越长，优先级约低
           return bMs - aMs;
         })()
       );
     });
-  }
 
-  protected mergeRuntimeInfo(task: T, info: Partial<ITaskRuntimeInfo>) {
-    this.taskRuntimeInfo.set(task, {
-      ...this.taskRuntimeInfo.get(task),
-      ...info,
-    });
-  }
+    const taskName = tasks.pop()?.task.name;
 
-  protected getRuntimeInfo(task: T): ITaskRuntimeInfo {
-    return {
-      ms: 0,
-      sendValue: undefined,
-      ...this.taskRuntimeInfo.get(task),
-    };
+    return taskName ? this.taskPool.get(taskName) : undefined;
   }
 
   /**
@@ -92,25 +96,6 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
    */
   protected shouldRunCallLoop(): boolean {
     return true;
-  }
-
-  /**
-   * @override 判断当前任务应该 run or skip
-   */
-  protected shouldTaskRun(_task: T): boolean {
-    return true;
-  }
-
-  protected popTaskQueue(): T | undefined {
-    // 先按优先级排序
-    this.sortTaskQueue();
-
-    return (this.pendingTask = this.taskQueue.pop());
-  }
-
-  protected unshiftTaskQueue(task: T) {
-    if (task === this.pendingTask) this.pendingTask = undefined;
-    this.taskQueue.unshift(task);
   }
 
   protected callLoop = (): void => {
@@ -125,42 +110,37 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     if (!this.shouldRunCallLoop()) return setCleanerThenScheduleNext(this.callLoop);
 
     // 取出优先级最高的任务
-    const task = this.popTaskQueue();
+    const taskData = this.pickTaskData();
 
     // 任务队列空了，退出
-    if (!task) {
-      this.isRunning = false;
+    if (!taskData) {
       this.emitAll(new EmptyEvent(), []);
       return;
     }
 
-    // task 运行前检查不通过，则 skip
-    if (!this.shouldTaskRun(task)) {
-      this.unshiftTaskQueue(task);
-      return setCleanerThenScheduleNext(this.callLoop);
-    }
+    taskData.stage = 'prepare';
 
     const runTask = () => {
-      const { sendValue } = this.getRuntimeInfo(task);
+      // 设置运行标记
+      taskData.stage = 'running';
+
+      const { task, sendValue: lastSendValue, ms: lastMs } = taskData;
 
       try {
-        const [{ value, done }, ms] = runtimeMs(() => task.iter.next(sendValue));
+        const [{ value, done }, ms] = runtimeMs(() => task.iter.next(lastSendValue));
 
         // 累加运行时间
-        this.mergeRuntimeInfo(task, { ms: (this.getRuntimeInfo(task).ms || 0) + ms });
+        taskData.ms = (lastMs || 0) + ms;
 
         toPromise(value)
           .then(resolvedValue => {
             // 记录 sendValue
-            this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
+            taskData.sendValue = resolvedValue;
 
             if (done) {
+              taskData.stage = 'done';
               this.emitAll(new DoneEvent(null, resolvedValue, task), [task]);
             } else {
-              // 未结束的任务要重新入队列
-              // 调用 .drop() 的时候会清空 pendingTask，表示废弃任务，不要重新入队列
-              if (this.pendingTask === task) this.unshiftTaskQueue(task);
-
               this.callback && this.callback(resolvedValue);
               this.emitAll(new YieldEvent(resolvedValue, task), [task]);
             }
@@ -169,12 +149,18 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
             this.callLoop();
           })
           .catch(e => {
+            taskData.stage = 'error';
+            taskData.error = e;
+
             this.emitAll(new DoneEvent(e, undefined, task), [task]);
 
             // 调度下一个
             this.callLoop();
           });
       } catch (e) {
+        taskData.stage = 'error';
+        taskData.error = e;
+
         // 发生了同步错误
         this.emitAll(new DoneEvent(e, undefined, task), [task]);
 
@@ -189,9 +175,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   start() {
     if (this.isRunning) return this;
 
-    this.isRunning = true;
-    this.emitAll(new StartEvent(), this.taskQueue);
-
+    this.emitAll(new StartEvent());
     this.callLoop();
 
     return this;
@@ -199,29 +183,48 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
 
   pause() {
     this.isPaused = true;
-    this.emitAll(new PauseEvent(), this.taskQueue);
+    this.emitAll(new PauseEvent());
     return this;
   }
 
   resume() {
     this.isPaused = false;
-    this.emitAll(new ResumeEvent(), this.taskQueue);
+    this.emitAll(new ResumeEvent());
     return this;
   }
 
   drop(tasks: T[]) {
-    // 结束任务
-    tasks.forEach(task => {
-      task !== this.pendingTask && task.iter.return && task.iter.return();
-      this.taskRuntimeInfo.delete(task);
+    const stageHandler = cond<{ taskData: ITaskData<T> }>({
+      init: ctx => {
+        ctx.taskData.stage = 'dropping';
+      },
+      prepare: ctx => {
+        ctx.taskData.stage = 'dropping';
+      },
+      running: ctx => {
+        ctx.taskData.stage = 'dropping';
+      },
+      error: ctx => {
+        ctx.taskData.stage = 'dropping';
+      },
+      dropping: ctx => {
+        ctx.taskData.stage = 'dropping';
+      },
+      dropped: ctx => {
+        ctx.taskData.stage = 'dropping';
+      },
+      done: ctx => {
+        ctx.taskData.task.iter.return?.();
+      },
     });
 
-    // 从 taskQueue 中剔除
-    this.taskQueue = this.taskQueue.filter(t => !tasks.includes(t));
+    // 结束任务
+    tasks.forEach(({ name }) => {
+      const taskData = this.taskPool.get(name);
+      if (!taskData) return;
 
-    if (this.pendingTask && tasks.includes(this.pendingTask)) {
-      this.pendingTask = undefined;
-    }
+      stageHandler(taskData.stage, { taskData });
+    });
 
     // 抛事件
     this.emitAll(new DropEvent(tasks), tasks);
@@ -229,16 +232,9 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   dropAll() {
-    const tasks = this.getUnFinishTaskQueue();
+    const tasks = [...this.taskPool.values()].map(d => d.task);
 
-    // 结束任务
-    this.taskQueue.forEach(task => {
-      task !== this.pendingTask && task.iter.return && task.iter.return();
-      this.taskRuntimeInfo.delete(task);
-    });
-
-    this.taskQueue = [];
-    this.pendingTask = undefined;
+    this.drop(tasks);
 
     // 抛事件
     this.emitAll(new DropEvent(tasks), tasks);
@@ -255,7 +251,6 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     this.dropAll();
 
     this.cancelNextSliceScheduler && this.cancelNextSliceScheduler();
-    this.isRunning = false;
     this.isPaused = false;
 
     // 先发一个事件，然后把事件总线关掉
@@ -264,8 +259,12 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   addTask(task: T) {
-    this.unshiftTaskQueue(task);
-    ensureUnique(this.taskQueue, 'name');
+    if (this.taskPool.has(task.name)) throw new Error('当前任务已存在 ' + task.name);
+
+    this.taskPool.set(task.name, {
+      task,
+      stage: 'init',
+    });
 
     if (this.config?.autoStart) this.start();
 
@@ -273,18 +272,24 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   /** 获取接下来的任务队列(不包含 pending 状态的队列) */
-  getTaskQueue() {
-    return [...this.taskQueue];
+  getTaskQueue(): T[] {
+    return [...this.taskPool.values()].filter(d => d.stage === 'init').map(d => d.task);
   }
 
   /** 获取未完成的任务队列 */
-  getUnFinishTaskQueue() {
-    return this.pendingTask ? [...this.getTaskQueue(), this.pendingTask] : this.getTaskQueue();
+  getUnFinishTaskQueue(): T[] {
+    return [...this.taskPool.values()]
+      .filter(d => d.stage === 'init' || d.stage === 'running')
+      .map(d => d.task);
   }
 
   /** 获取接下来的任务队列长度 */
-  getTaskQueueSize() {
-    return this.taskQueue.length;
+  getTaskQueueSize(): number {
+    return this.getTaskQueue().length;
+  }
+
+  get isRunning(): boolean {
+    return [...this.taskPool.values()].some(d => d.stage === 'prepare' || d.stage === 'running');
   }
 
   on<E extends typeof BaseEvent>(type: E, h: (event: InstanceType<E>) => void) {
