@@ -11,7 +11,7 @@ import {
 } from '../src';
 
 describe('__tests__/driver.test.ts', () => {
-  it.only('单任务', done => {
+  it('单任务', done => {
     const i1 = (function* () {
       yield 'x';
     })();
@@ -189,8 +189,17 @@ describe('__tests__/driver.test.ts', () => {
 
   it('shouldTaskRun test', done => {
     class TestTaskDriver extends TaskDriver {
+      private cnt = 10;
+
       shouldTaskRun(task: BaseTask) {
         if (task.name === 'skip') return false;
+        return true;
+      }
+
+      shouldRunCallLoop() {
+        if (this.cnt-- === 0) {
+          this.dispose();
+        }
         return true;
       }
     }
@@ -223,7 +232,7 @@ describe('__tests__/driver.test.ts', () => {
       expect(value).toBe('x');
     });
 
-    d.on(EmptyEvent, () => {
+    d.on(DisposeEvent, () => {
       expect(flag).toEqual(['i1', 'i1', 'i1']);
       done();
     }).start();

@@ -119,6 +119,11 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     return toRunTask;
   }
 
+  protected unshiftTaskQueue(task: T) {
+    if (task === this.pendingTask) this.pendingTask = undefined;
+    this.taskQueue.unshift(task);
+  }
+
   protected callLoop = (): void => {
     // 任务队列空
     if (this.getUnFinishTaskQueue().length === 0) {
@@ -141,9 +146,11 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     const task = this.popTaskQueue();
 
     // 当前没有要执行的任务, 进入下一个循环
-    if (!task) return setCleanerThenScheduleNext(this.callLoop);
+    if (!task) {
+      this.pendingTask = undefined;
+      return setCleanerThenScheduleNext(this.callLoop);
+    }
 
-    // 设置标记
     this.pendingTask = task;
 
     const runTask = () => {
@@ -157,9 +164,6 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
 
         toPromise(value)
           .then(resolvedValue => {
-            // 清空标记
-            this.pendingTask = undefined;
-
             // 记录 sendValue
             this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
 
@@ -168,7 +172,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
             } else {
               // 未结束的任务要重新入队列
               // 调用 .drop() 的时候会清空 pendingTask，表示废弃任务，不要重新入队列
-              this.taskQueue.unshift(task);
+              if (this.pendingTask === task) this.unshiftTaskQueue(task);
 
               this.callback && this.callback(resolvedValue);
               this.emitAll(new YieldEvent(resolvedValue, task), [task]);
@@ -178,9 +182,6 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
             this.callLoop();
           })
           .catch(e => {
-            // 清空标记
-            this.pendingTask = undefined;
-
             this.emitAll(new DoneEvent(e, undefined, task), [task]);
 
             // 调度下一个
