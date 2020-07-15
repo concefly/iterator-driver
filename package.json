@@ -9,6 +9,7 @@
   "module": "dist/es/index.js",
   "scripts": {
     "test": "jest",
+    "debug": "node --inspect-brk node_modules/.bin/jest --runInBand --no-cache --no-watchman --coverage=false --testTimeout=60000",
     "ci": "tsc -p tsconfig.build.es.json --noEmit && tsc -p tsconfig.build.json --noEmit && npm run test",
     "clean": "rm -rf dist/*",
     "build:es": "tsc -p tsconfig.build.es.json --outDir dist/es",

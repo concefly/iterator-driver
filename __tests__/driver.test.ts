@@ -11,7 +11,7 @@ import {
 } from '../src';
 
 describe('__tests__/driver.test.ts', () => {
-  it('单任务', done => {
+  it.only('单任务', done => {
     const i1 = (function* () {
       yield 'x';
     })();
@@ -188,15 +188,10 @@ describe('__tests__/driver.test.ts', () => {
   });
 
   it('shouldTaskRun test', done => {
-    let cnt = 0;
-
     class TestTaskDriver extends TaskDriver {
       shouldTaskRun(task: BaseTask) {
-        if (cnt++ < 5) {
-          return task.name !== 'skip';
-        }
-        this.dispose();
-        return false;
+        if (task.name === 'skip') return false;
+        return true;
       }
     }
 
@@ -205,7 +200,8 @@ describe('__tests__/driver.test.ts', () => {
     const t1 = new BaseTask(
       {
         iter: (function* () {
-          flag.push('i1');
+          let cnt = 3;
+          while (cnt--) flag.push('i1');
         })(),
         priority: 1,
       },
@@ -215,7 +211,8 @@ describe('__tests__/driver.test.ts', () => {
     const t2 = new BaseTask(
       {
         iter: (function* () {
-          flag.push('i2');
+          let cnt = 3;
+          while (cnt--) flag.push('i2');
         })(),
         priority: 1,
       },
@@ -226,8 +223,8 @@ describe('__tests__/driver.test.ts', () => {
       expect(value).toBe('x');
     });
 
-    d.on(DropEvent, () => {
-      expect(flag).toEqual(['i1']);
+    d.on(EmptyEvent, () => {
+      expect(flag).toEqual(['i1', 'i1', 'i1']);
       done();
     }).start();
   });
