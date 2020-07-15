@@ -42,3 +42,20 @@ export function ensureUnique<T>(list: T[], by: keyof T) {
     t.add(key);
   }
 }
+
+const injectFlagSym = Symbol('injectFlag');
+
+export function setInjectValue<T>(target: T, value: any): T {
+  Object.defineProperty(target, injectFlagSym, {
+    value,
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
+
+  return target;
+}
+
+export function getInjectValue(target: any) {
+  return target[injectFlagSym];
+}

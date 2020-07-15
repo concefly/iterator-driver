@@ -12,13 +12,21 @@ import {
 } from './event';
 import { BaseTask } from './task';
 import { BaseScheduler } from './scheduler';
-import { runtimeMs, toPromise, ensureUnique } from './util';
+import { runtimeMs, toPromise, ensureUnique, setInjectValue, getInjectValue } from './util';
 
 export type ITaskRuntimeInfo = {
   /** 运行 ms 数 */
   ms?: number;
   sendValue?: any;
 };
+
+type IInjectCommandType =
+  | {
+      type: 'exit';
+    }
+  | {
+      type: 'continue';
+    };
 
 /** 创建切片任务驱动器 */
 export class TaskDriver<T extends BaseTask = BaseTask> {
@@ -29,6 +37,8 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   protected isPaused = false;
   protected isRunning = false;
   protected cancelNextSliceScheduler?: () => void;
+
+  protected injectCommands: IInjectCommandType[] = [];
 
   constructor(
     task: T[] | T,
@@ -54,8 +64,8 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   /** 优先级大的排后面 */
-  protected sortTaskQueue() {
-    this.taskQueue.sort((a, b) => {
+  protected sortTaskQueue(tasks: T[]) {
+    tasks.sort((a, b) => {
       return (
         // 优先级排序
         a.priority - b.priority ||
@@ -101,98 +111,9 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     return true;
   }
 
-  protected popTaskQueue(): T | undefined {
-    // 先按优先级排序
-    this.sortTaskQueue();
-
-    return (this.pendingTask = this.taskQueue.pop());
-  }
-
-  protected unshiftTaskQueue(task: T) {
-    if (task === this.pendingTask) this.pendingTask = undefined;
-    this.taskQueue.unshift(task);
-  }
-
-  protected callLoop = (): void => {
-    const setCleanerThenScheduleNext = (fn: () => void) => {
-      this.cancelNextSliceScheduler = this.scheduler.schedule(fn);
-    };
-
-    // 判断是否暂停中
-    if (this.isPaused) return setCleanerThenScheduleNext(this.callLoop);
-
-    // 自定义检查
-    if (!this.shouldRunCallLoop()) return setCleanerThenScheduleNext(this.callLoop);
-
-    // 取出优先级最高的任务
-    const task = this.popTaskQueue();
-
-    // 任务队列空了，退出
-    if (!task) {
-      this.isRunning = false;
-      this.emitAll(new EmptyEvent(), []);
-      return;
-    }
-
-    // task 运行前检查不通过，则 skip
-    if (!this.shouldTaskRun(task)) {
-      this.unshiftTaskQueue(task);
-      return setCleanerThenScheduleNext(this.callLoop);
-    }
-
-    const runTask = () => {
-      const { sendValue } = this.getRuntimeInfo(task);
-
-      try {
-        const [{ value, done }, ms] = runtimeMs(() => task.iter.next(sendValue));
-
-        // 累加运行时间
-        this.mergeRuntimeInfo(task, { ms: (this.getRuntimeInfo(task).ms || 0) + ms });
-
-        toPromise(value)
-          .then(resolvedValue => {
-            // 记录 sendValue
-            this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
-
-            if (done) {
-              this.emitAll(new DoneEvent(null, resolvedValue, task), [task]);
-            } else {
-              // 未结束的任务要重新入队列
-              // 调用 .drop() 的时候会清空 pendingTask，表示废弃任务，不要重新入队列
-              if (this.pendingTask === task) this.unshiftTaskQueue(task);
-
-              this.callback && this.callback(resolvedValue);
-              this.emitAll(new YieldEvent(resolvedValue, task), [task]);
-            }
-
-            // 调度下一个
-            this.callLoop();
-          })
-          .catch(e => {
-            this.emitAll(new DoneEvent(e, undefined, task), [task]);
-
-            // 调度下一个
-            this.callLoop();
-          });
-      } catch (e) {
-        // 发生了同步错误
-        this.emitAll(new DoneEvent(e, undefined, task), [task]);
-
-        // 调度下一个
-        this.callLoop();
-      }
-    };
-
-    setCleanerThenScheduleNext(runTask);
-  };
-
   start() {
-    if (this.isRunning) return this;
-
-    this.isRunning = true;
-    this.emitAll(new StartEvent(), this.taskQueue);
-
-    this.callLoop();
+    // float promise
+    this.doLoop();
 
     return this;
   }
@@ -210,38 +131,31 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   drop(tasks: T[]) {
-    // 结束任务
-    tasks.forEach(task => {
-      task !== this.pendingTask && task.iter.return && task.iter.return();
-      this.taskRuntimeInfo.delete(task);
+    const newTaskQueue: T[] = [];
+    const toDropTasks: T[] = [];
+
+    const dropNameSet = new Set(tasks.map(t => t.name));
+
+    this.taskQueue.forEach(t => {
+      if (dropNameSet.has(t.name)) toDropTasks.push(t);
+      else newTaskQueue.push(t);
     });
 
-    // 从 taskQueue 中剔除
-    this.taskQueue = this.taskQueue.filter(t => !tasks.includes(t));
+    this.taskQueue = newTaskQueue;
 
-    if (this.pendingTask && tasks.includes(this.pendingTask)) {
-      this.pendingTask = undefined;
-    }
+    // 跳过当前的任务
+    if (this.pendingTask) this.injectCommands.unshift({ type: 'continue' });
 
-    // 抛事件
-    this.emitAll(new DropEvent(tasks), tasks);
+    this.emitAll(new DropEvent(toDropTasks), toDropTasks);
+
     return this;
   }
 
   dropAll() {
     const tasks = this.getUnFinishTaskQueue();
-
-    // 结束任务
-    this.taskQueue.forEach(task => {
-      task !== this.pendingTask && task.iter.return && task.iter.return();
-      this.taskRuntimeInfo.delete(task);
-    });
-
-    this.taskQueue = [];
-    this.pendingTask = undefined;
-
-    // 抛事件
     this.emitAll(new DropEvent(tasks), tasks);
+    this.taskQueue = [];
+
     return this;
   }
 
@@ -251,20 +165,24 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
    * - 重置状态
    */
   dispose() {
-    // 卸掉所有任务
     this.dropAll();
 
-    this.cancelNextSliceScheduler && this.cancelNextSliceScheduler();
+    this.pendingTask = undefined;
     this.isRunning = false;
     this.isPaused = false;
+
+    // 设置退出循环
+    this.injectCommands = [{ type: 'exit' }];
 
     // 先发一个事件，然后把事件总线关掉
     this.emitAll(new DisposeEvent(), []);
     this.eventBus.off();
+
+    return this;
   }
 
   addTask(task: T) {
-    this.unshiftTaskQueue(task);
+    this.taskQueue.unshift(task);
     ensureUnique(this.taskQueue, 'name');
 
     if (this.config?.autoStart) this.start();
@@ -295,5 +213,116 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   off<E extends typeof BaseEvent>(type?: E, h?: Function) {
     this.eventBus.off(type, h);
     return this;
+  }
+
+  protected async doLoop() {
+    if (this.isRunning) return;
+    this.isRunning = true;
+
+    const waitPromise = async <T>(value: Promise<T>): Promise<T> => {
+      const result = await value;
+
+      // 系统注入的异常
+      if (this.injectCommands.length) {
+        const command = this.injectCommands.pop()!;
+        throw setInjectValue(new Error(command.type), command);
+      }
+
+      return result;
+    };
+
+    const waitSchedule = () =>
+      waitPromise(
+        new Promise<void>(r => this.scheduler.schedule(r))
+      );
+
+    this.emitAll(new StartEvent(), this.taskQueue);
+
+    while (1) {
+      try {
+        const taskQueue = this.taskQueue;
+        if (taskQueue.length === 0) {
+          this.emitAll(new EmptyEvent(), []);
+          break;
+        }
+
+        // 等待调度
+        await waitSchedule();
+
+        // 判断是否暂停中
+        if (this.isPaused) continue;
+
+        // 自定义检查
+        if (!this.shouldRunCallLoop()) continue;
+
+        const shouldRunTasks = taskQueue.filter(t => this.shouldTaskRun(t));
+        if (shouldRunTasks.length === 0) continue;
+
+        // 优先级排序
+        this.sortTaskQueue(shouldRunTasks);
+
+        const task = shouldRunTasks.pop();
+        if (!task) continue;
+
+        // 从原始 taskQueue 中剔除
+        const taskOriginIndex = this.taskQueue.findIndex(t => t.name === task.name);
+        if (taskOriginIndex < 0) throw new Error('shouldRunTask 任务不存在 ' + task.name);
+
+        this.taskQueue.splice(taskOriginIndex, 1);
+
+        // 标记
+        this.pendingTask = task;
+
+        const { sendValue } = this.getRuntimeInfo(task);
+        const [{ value, done }, ms] = runtimeMs(() => task.iter.next(sendValue));
+
+        // 累加运行时间
+        this.mergeRuntimeInfo(task, { ms: (this.getRuntimeInfo(task).ms || 0) + ms });
+
+        // 求值
+        let resolvedValue: any;
+        try {
+          resolvedValue = await waitPromise(toPromise(value));
+          // 清除标记
+          this.pendingTask = undefined;
+        } catch (taskError) {
+          // 清除标记
+          this.pendingTask = undefined;
+
+          // 如果是注入的错误，直接往外抛，由外面处理
+          if (getInjectValue(taskError)) throw taskError;
+
+          // 否则抛事件，并继续调度
+          this.emitAll(new DoneEvent(taskError, undefined, task), [task]);
+          continue;
+        }
+
+        // 记录 sendValue
+        this.mergeRuntimeInfo(task, { sendValue: resolvedValue });
+
+        if (done) {
+          this.emitAll(new DoneEvent(null, resolvedValue, task), [task]);
+        } else {
+          // 未结束的任务要重新入队列
+          this.taskQueue.unshift(task);
+
+          this.callback && this.callback(resolvedValue);
+          this.emitAll(new YieldEvent(resolvedValue, task), [task]);
+        }
+      } catch (commonError) {
+        const command = getInjectValue(commonError) as IInjectCommandType;
+        console.log('@@@', 'command ->', commonError, command);
+
+        if (command) {
+          // 退出
+          if (command.type === 'exit') break;
+
+          // 下一个循环
+          if (command.type === 'continue') continue;
+        }
+      }
+    }
+
+    this.isRunning = false;
   }
 }

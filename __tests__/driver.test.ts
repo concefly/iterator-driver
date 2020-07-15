@@ -44,20 +44,24 @@ describe('__tests__/driver.test.ts', () => {
       yield '2.2';
       return '2.3';
     })();
-    const t1 = new BaseTask({ iter: i1, priority: 2 });
-    const t2 = new BaseTask({ iter: i2, priority: 1 });
+    const t1 = new BaseTask({ iter: i1, priority: 2 }, 'BaseTask-1');
+    const t2 = new BaseTask({ iter: i2, priority: 1 }, 'BaseTask-2');
 
     const driver = new TaskDriver([t1, t2], new TimeoutScheduler());
 
     let flag: string[] = [];
 
     driver
-      .on(StartEvent, () => flag.push('StartEvent'))
+      .on(StartEvent, () => {
+        flag.push('StartEvent');
+      })
       .on(YieldEvent, e => {
         flag.push(`YieldEvent-${e.value}`);
         if (e.value === '2.2') driver.drop([t2]);
       })
-      .on(DoneEvent, e => flag.push(`DoneEvent-${e.value}-${e.error}`))
+      .on(DoneEvent, e => {
+        flag.push(`DoneEvent-${e.value}-${e.error}`);
+      })
       .on(DropEvent, e => {
         flag.push(`DropEvent-${e.tasks.map(t => t.name).join(',')}`);
       })
@@ -328,7 +332,7 @@ describe('__tests__/driver.test.ts', () => {
   });
 
   describe('错误堆栈还原', () => {
-    it('同步栈 & 异步栈', done => {
+    it.only('同步栈 & 异步栈', done => {
       const invokeCnt = { i1: 0, i2: 0, i3: 0 };
       const invokeErrorEvents: DoneEvent[] = [];
 
@@ -359,11 +363,13 @@ describe('__tests__/driver.test.ts', () => {
 
       new TaskDriver([t1, t2, t3], new TimeoutScheduler())
         .on(DoneEvent, e => {
+          console.log('@@@', 'DoneEvent ->', 1);
           if (e.error) {
             invokeErrorEvents.push(e);
           }
         })
         .on(EmptyEvent, () => {
+          console.log('@@@', 'EmptyEvent ->', 1);
           expect(invokeCnt).toStrictEqual({ i1: 1, i2: 1, i3: 2 });
 
           expect(invokeErrorEvents[0].error?.message).toContain('fake error1');
