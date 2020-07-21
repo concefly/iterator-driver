@@ -15,6 +15,7 @@ import { BaseTask } from './task';
 import { BaseScheduler } from './scheduler';
 import { runtimeMs, toPromise, cond, noop, setInjectValue, getInjectValue } from './util';
 
+export type IDriverState = 'init' | 'running' | 'paused' | 'error' | 'done';
 export type ITaskStage = 'init' | 'ready' | 'running' | 'error' | 'dropped' | 'done';
 
 export type ITaskData<T> = {
@@ -39,7 +40,7 @@ type IInjectCommandType =
 export class TaskDriver<T extends BaseTask = BaseTask> {
   protected taskPool = new Map<string, ITaskData<T>>();
   protected eventBus = new EventBus();
-  protected isPaused = false;
+  protected state: IDriverState = 'init';
   protected injectCommands: IInjectCommandType[] = [];
 
   constructor(
@@ -132,28 +133,23 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   pause() {
-    this.isPaused = true;
+    this.state = 'paused';
     this.emitAll(new PauseEvent());
     return this;
   }
 
   resume() {
-    this.isPaused = false;
+    this.state = 'running';
     this.emitAll(new ResumeEvent());
     return this;
   }
 
   drop(tasks: T[]) {
     const stageHandler = cond<{ taskData: ITaskData<T> }>({
-      init: ctx => {
-        this.injectCommands.unshift({ type: 'continue' });
-        ctx.taskData.stage = 'dropped';
-      },
-      ready: ctx => {
-        this.injectCommands.unshift({ type: 'continue' });
-        ctx.taskData.stage = 'dropped';
-      },
+      init: ctx => (ctx.taskData.stage = 'dropped'),
+      ready: ctx => (ctx.taskData.stage = 'dropped'),
       running: ctx => {
+        // 卸载正在执行中的任务，要废弃掉当前这个循环
         this.injectCommands.unshift({ type: 'continue' });
         ctx.taskData.stage = 'dropped';
       },
@@ -195,7 +191,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
 
     // 清除任务池
     this.taskPool.clear();
-    this.isPaused = false;
+    this.state = 'init';
 
     // 设置退出循环
     this.injectCommands = [{ type: 'exit' }];
@@ -226,7 +222,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   get isRunning(): boolean {
-    return [...this.taskPool.values()].some(d => d.stage === 'ready' || d.stage === 'running');
+    return this.state === 'running';
   }
 
   on<E extends typeof BaseEvent>(type: E, h: (event: InstanceType<E>) => void) {
@@ -240,7 +236,8 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   protected async doLoop() {
-    if (this.isRunning) return;
+    if (this.state === 'running') return;
+    this.state = 'running';
 
     const waitPromise = async <T>(value: Promise<T>): Promise<T> => {
       const result = await value;
@@ -264,87 +261,104 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
       [...this.taskPool.values()].map(d => d.task)
     );
 
-    while (1) {
-      try {
-        const taskInfos = this.getUnFinishTaskPoolItem();
-        if (taskInfos.length === 0) {
-          this.emitAll(new EmptyEvent(), []);
-          break;
-        }
+    const exit = (err?: Error) => {
+      if (err) {
+        this.state = 'error';
 
-        // 判断是否暂停中
-        if (this.isPaused) continue;
+        this.emitAll(
+          new CrashEvent(err),
+          [...this.taskPool.values()].map(d => d.task)
+        );
+      } else {
+        this.state = 'done';
+      }
+    };
 
-        // 自定义检查
-        if (!this.shouldRunCallLoop()) continue;
-
-        const shouldRunTaskInfos = taskInfos.filter(d => this.shouldTaskRun(d.task));
-        if (shouldRunTaskInfos.length === 0) continue;
-
-        // 优先级排序
-        const taskInfo = this.pickTaskData(shouldRunTaskInfos);
-        if (!taskInfo) continue;
-
-        taskInfo.stage = 'ready';
-
-        // 等待调度
-        await waitSchedule();
-
-        taskInfo.stage = 'running';
-
-        const { sendValue } = taskInfo;
-
-        // 求值
-        let resolvedValue: any;
-        let isDone = false;
-        let invokeMs = 0;
-
+    try {
+      while (1) {
         try {
-          const [{ value, done }, ms] = runtimeMs(() => taskInfo.task.iter.next(sendValue));
-          invokeMs = ms;
-          isDone = !!done;
+          const taskInfos = this.getUnFinishTaskPoolItem();
+          if (taskInfos.length === 0) {
+            this.emitAll(new EmptyEvent(), []);
+            break;
+          }
 
-          resolvedValue = await waitPromise(toPromise(value));
-        } catch (taskError) {
-          // 如果是注入的错误，直接往外抛，由外面处理
-          if (getInjectValue(taskError)) throw taskError;
+          // 判断是否暂停中
+          // FIXME: ts 类型系统会误判 state 始终为 running
+          if ((this.state as any) === 'paused') continue;
 
-          // 否则抛事件，并继续调度
-          this.emitAll(new DoneEvent(taskError, undefined, taskInfo.task), [taskInfo.task]);
-          continue;
-        }
+          // 自定义检查
+          if (!this.shouldRunCallLoop()) continue;
 
-        // 累加运行时间
-        taskInfo.ms = (taskInfo.ms || 0) + invokeMs;
+          const shouldRunTaskInfos = taskInfos.filter(d => this.shouldTaskRun(d.task));
+          if (shouldRunTaskInfos.length === 0) continue;
 
-        // 记录 sendValue
-        taskInfo.sendValue = resolvedValue;
+          // 优先级排序
+          const taskInfo = this.pickTaskData(shouldRunTaskInfos);
+          if (!taskInfo) continue;
 
-        if (isDone) {
-          taskInfo.stage = 'done';
-          this.emitAll(new DoneEvent(null, resolvedValue, taskInfo.task), [taskInfo.task]);
-        } else {
-          this.callback && this.callback(resolvedValue);
-          this.emitAll(new YieldEvent(resolvedValue, taskInfo.task), [taskInfo.task]);
-        }
-      } catch (commonError) {
-        const command = getInjectValue(commonError) as IInjectCommandType;
+          taskInfo.stage = 'ready';
 
-        if (command) {
-          // 退出
-          if (command.type === 'exit') break;
+          // 等待调度
+          await waitSchedule();
 
-          // 下一个循环
-          if (command.type === 'continue') continue;
-        } else {
-          this.emitAll(
-            new CrashEvent(commonError),
-            [...this.taskPool.values()].map(d => d.task)
-          );
+          taskInfo.stage = 'running';
 
-          throw commonError;
+          const { sendValue } = taskInfo;
+
+          // 求值
+          let resolvedValue: any;
+          let isDone = false;
+          let invokeMs = 0;
+
+          try {
+            const [{ value, done }, ms] = runtimeMs(() => taskInfo.task.iter.next(sendValue));
+            invokeMs = ms;
+            isDone = !!done;
+
+            resolvedValue = await waitPromise(toPromise(value));
+          } catch (taskError) {
+            // 如果是注入的错误，直接往外抛，由外面处理
+            if (getInjectValue(taskError)) throw taskError;
+
+            // 否则抛事件，并继续调度
+            this.emitAll(new DoneEvent(taskError, undefined, taskInfo.task), [taskInfo.task]);
+            continue;
+          }
+
+          // 累加运行时间
+          taskInfo.ms = (taskInfo.ms || 0) + invokeMs;
+
+          // 记录 sendValue
+          taskInfo.sendValue = resolvedValue;
+
+          if (isDone) {
+            taskInfo.stage = 'done';
+            this.emitAll(new DoneEvent(null, resolvedValue, taskInfo.task), [taskInfo.task]);
+          } else {
+            this.callback && this.callback(resolvedValue);
+            this.emitAll(new YieldEvent(resolvedValue, taskInfo.task), [taskInfo.task]);
+          }
+        } catch (commonError) {
+          const command = getInjectValue(commonError) as IInjectCommandType;
+
+          if (command) {
+            // 退出
+            if (command.type === 'exit') break;
+
+            // 下一个循环
+            if (command.type === 'continue') continue;
+          } else {
+            throw commonError;
+          }
         }
       }
+
+      // 执行退出逻辑
+      exit();
+    } catch (finalError) {
+      exit(finalError);
+      throw finalError;
     }
   }
 }
