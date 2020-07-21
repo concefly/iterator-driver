@@ -16,7 +16,7 @@ import { BaseScheduler } from './scheduler';
 import { runtimeMs, toPromise, cond, noop, setInjectValue, getInjectValue } from './util';
 
 export type IDriverState = 'init' | 'running' | 'paused' | 'error' | 'done';
-export type ITaskStage = 'init' | 'ready' | 'running' | 'error' | 'dropped' | 'done';
+export type ITaskStage = 'init' | 'running' | 'error' | 'dropped' | 'done';
 
 export type ITaskData<T> = {
   task: T;
@@ -120,9 +120,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   protected getUnFinishTaskPoolItem(): ITaskData<T>[] {
-    return [...this.taskPool.values()].filter(
-      d => d.stage === 'init' || d.stage === 'ready' || d.stage === 'running'
-    );
+    return [...this.taskPool.values()].filter(d => d.stage === 'init' || d.stage === 'running');
   }
 
   start() {
@@ -147,7 +145,6 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   drop(tasks: T[]) {
     const stageHandler = cond<{ taskData: ITaskData<T> }>({
       init: ctx => (ctx.taskData.stage = 'dropped'),
-      ready: ctx => (ctx.taskData.stage = 'dropped'),
       running: ctx => {
         // 卸载正在执行中的任务，要废弃掉当前这个循环
         this.injectCommands.unshift({ type: 'continue' });
@@ -277,6 +274,9 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     try {
       while (1) {
         try {
+          // 每个循环开始都要等待调度
+          await waitSchedule();
+
           const taskInfos = this.getUnFinishTaskPoolItem();
           if (taskInfos.length === 0) {
             this.emitAll(new EmptyEvent(), []);
@@ -297,13 +297,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
           const taskInfo = this.pickTaskData(shouldRunTaskInfos);
           if (!taskInfo) continue;
 
-          taskInfo.stage = 'ready';
-
-          // 等待调度
-          await waitSchedule();
-
           taskInfo.stage = 'running';
-
           const { sendValue } = taskInfo;
 
           // 求值
@@ -322,6 +316,9 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
             if (getInjectValue(taskError)) throw taskError;
 
             // 否则抛事件，并继续调度
+            taskInfo.stage = 'error';
+            taskInfo.error = taskError;
+
             this.emitAll(new DoneEvent(taskError, undefined, taskInfo.task), [taskInfo.task]);
             continue;
           }
