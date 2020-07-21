@@ -58,6 +58,15 @@ export class DisposeEvent extends BaseEvent {
   static displayName = 'dispose';
 }
 
+/** 崩溃 */
+export class CrashEvent extends BaseEvent {
+  static displayName = 'CrashEvent';
+
+  constructor(public readonly error: Error) {
+    super();
+  }
+}
+
 export class EventBus {
   private handleMap = new Map<BaseEvent, Function[]>();
 

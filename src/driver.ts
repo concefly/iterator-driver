@@ -9,12 +9,13 @@ import {
   DropEvent,
   EmptyEvent,
   DisposeEvent,
+  CrashEvent,
 } from './event';
 import { BaseTask } from './task';
 import { BaseScheduler } from './scheduler';
-import { runtimeMs, toPromise, cond, noop } from './util';
+import { runtimeMs, toPromise, cond, noop, setInjectValue, getInjectValue } from './util';
 
-export type ITaskStage = 'init' | 'prepare' | 'running' | 'error' | 'dropped' | 'done';
+export type ITaskStage = 'init' | 'ready' | 'running' | 'error' | 'dropped' | 'done';
 
 export type ITaskData<T> = {
   task: T;
@@ -26,12 +27,20 @@ export type ITaskData<T> = {
   error?: Error;
 };
 
+type IInjectCommandType =
+  | {
+      type: 'exit';
+    }
+  | {
+      type: 'continue';
+    };
+
 /** 创建切片任务驱动器 */
 export class TaskDriver<T extends BaseTask = BaseTask> {
   protected taskPool = new Map<string, ITaskData<T>>();
   protected eventBus = new EventBus();
   protected isPaused = false;
-  protected cancelNextSliceScheduler?: () => void;
+  protected injectCommands: IInjectCommandType[] = [];
 
   constructor(
     tasks: T[],
@@ -109,98 +118,15 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     return true;
   }
 
-  protected getUnFinishTaskData(): ITaskData<T>[] {
+  protected getUnFinishTaskPoolItem(): ITaskData<T>[] {
     return [...this.taskPool.values()].filter(
-      d => d.stage === 'init' || d.stage === 'prepare' || d.stage === 'running'
+      d => d.stage === 'init' || d.stage === 'ready' || d.stage === 'running'
     );
   }
 
-  protected callLoop = (): void => {
-    const unFinishTaskData = this.getUnFinishTaskData();
-
-    // 任务队列空了，退出
-    if (unFinishTaskData.length === 0) {
-      this.emitAll(new EmptyEvent(), []);
-      return;
-    }
-
-    const setCleanerThenScheduleNext = (fn: () => void) => {
-      this.cancelNextSliceScheduler = this.scheduler.schedule(fn);
-    };
-
-    // 判断是否暂停中
-    if (this.isPaused) return setCleanerThenScheduleNext(this.callLoop);
-
-    // 自定义检查
-    if (!this.shouldRunCallLoop()) return setCleanerThenScheduleNext(this.callLoop);
-
-    // 取出优先级最高的任务
-    const taskData = this.pickTaskData(unFinishTaskData);
-    if (!taskData) return setCleanerThenScheduleNext(this.callLoop);
-
-    const runTask = () => {
-      // 设置运行标记
-      taskData.stage = 'running';
-
-      const { task, sendValue: lastSendValue, ms: lastMs } = taskData;
-
-      try {
-        const [{ value, done }, ms] = runtimeMs(() => task.iter.next(lastSendValue));
-
-        // 累加运行时间
-        taskData.ms = (lastMs || 0) + ms;
-
-        toPromise(value)
-          .then(resolvedValue => {
-            if (taskData.stage === 'running') {
-              // 记录 sendValue
-              taskData.sendValue = resolvedValue;
-
-              if (done) {
-                taskData.stage = 'done';
-                this.emitAll(new DoneEvent(null, resolvedValue, task), [task]);
-              } else {
-                taskData.stage = 'prepare';
-                this.callback && this.callback(resolvedValue);
-                this.emitAll(new YieldEvent(resolvedValue, task), [task]);
-              }
-            } else {
-              // 被修改了状态，则什么都不干（比如调了 drop）
-            }
-
-            // 调度下一个
-            this.callLoop();
-          })
-          .catch(e => {
-            taskData.stage = 'error';
-            taskData.error = e;
-
-            this.emitAll(new DoneEvent(e, undefined, task), [task]);
-
-            // 调度下一个
-            this.callLoop();
-          });
-      } catch (e) {
-        taskData.stage = 'error';
-        taskData.error = e;
-
-        // 发生了同步错误
-        this.emitAll(new DoneEvent(e, undefined, task), [task]);
-
-        // 调度下一个
-        this.callLoop();
-      }
-    };
-
-    taskData.stage = 'prepare';
-    setCleanerThenScheduleNext(runTask);
-  };
-
   start() {
-    if (this.isRunning) return this;
-
-    this.emitAll(new StartEvent());
-    this.callLoop();
+    // float promise
+    this.doLoop();
 
     return this;
   }
@@ -220,12 +146,15 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   drop(tasks: T[]) {
     const stageHandler = cond<{ taskData: ITaskData<T> }>({
       init: ctx => {
+        this.injectCommands.unshift({ type: 'continue' });
         ctx.taskData.stage = 'dropped';
       },
-      prepare: ctx => {
+      ready: ctx => {
+        this.injectCommands.unshift({ type: 'continue' });
         ctx.taskData.stage = 'dropped';
       },
       running: ctx => {
+        this.injectCommands.unshift({ type: 'continue' });
         ctx.taskData.stage = 'dropped';
       },
       error: noop,
@@ -266,9 +195,10 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
 
     // 清除任务池
     this.taskPool.clear();
-
-    this.cancelNextSliceScheduler && this.cancelNextSliceScheduler();
     this.isPaused = false;
+
+    // 设置退出循环
+    this.injectCommands = [{ type: 'exit' }];
 
     // 先发一个事件，然后把事件总线关掉
     this.emitAll(new DisposeEvent(), []);
@@ -292,11 +222,11 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
 
   /** 获取未完成的任务队列 */
   getUnFinishTaskQueue(): T[] {
-    return this.getUnFinishTaskData().map(d => d.task);
+    return this.getUnFinishTaskPoolItem().map(d => d.task);
   }
 
   get isRunning(): boolean {
-    return [...this.taskPool.values()].some(d => d.stage === 'prepare' || d.stage === 'running');
+    return [...this.taskPool.values()].some(d => d.stage === 'ready' || d.stage === 'running');
   }
 
   on<E extends typeof BaseEvent>(type: E, h: (event: InstanceType<E>) => void) {
@@ -307,5 +237,114 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   off<E extends typeof BaseEvent>(type?: E, h?: Function) {
     this.eventBus.off(type, h);
     return this;
+  }
+
+  protected async doLoop() {
+    if (this.isRunning) return;
+
+    const waitPromise = async <T>(value: Promise<T>): Promise<T> => {
+      const result = await value;
+
+      // 系统注入的异常
+      if (this.injectCommands.length) {
+        const command = this.injectCommands.pop()!;
+        throw setInjectValue(new Error(command.type), command);
+      }
+
+      return result;
+    };
+
+    const waitSchedule = () =>
+      waitPromise(
+        new Promise<void>(r => this.scheduler.schedule(r))
+      );
+
+    this.emitAll(
+      new StartEvent(),
+      [...this.taskPool.values()].map(d => d.task)
+    );
+
+    while (1) {
+      try {
+        const taskInfos = this.getUnFinishTaskPoolItem();
+        if (taskInfos.length === 0) {
+          this.emitAll(new EmptyEvent(), []);
+          break;
+        }
+
+        // 判断是否暂停中
+        if (this.isPaused) continue;
+
+        // 自定义检查
+        if (!this.shouldRunCallLoop()) continue;
+
+        const shouldRunTaskInfos = taskInfos.filter(d => this.shouldTaskRun(d.task));
+        if (shouldRunTaskInfos.length === 0) continue;
+
+        // 优先级排序
+        const taskInfo = this.pickTaskData(shouldRunTaskInfos);
+        if (!taskInfo) continue;
+
+        taskInfo.stage = 'ready';
+
+        // 等待调度
+        await waitSchedule();
+
+        taskInfo.stage = 'running';
+
+        const { sendValue } = taskInfo;
+
+        // 求值
+        let resolvedValue: any;
+        let isDone = false;
+        let invokeMs = 0;
+
+        try {
+          const [{ value, done }, ms] = runtimeMs(() => taskInfo.task.iter.next(sendValue));
+          invokeMs = ms;
+          isDone = !!done;
+
+          resolvedValue = await waitPromise(toPromise(value));
+        } catch (taskError) {
+          // 如果是注入的错误，直接往外抛，由外面处理
+          if (getInjectValue(taskError)) throw taskError;
+
+          // 否则抛事件，并继续调度
+          this.emitAll(new DoneEvent(taskError, undefined, taskInfo.task), [taskInfo.task]);
+          continue;
+        }
+
+        // 累加运行时间
+        taskInfo.ms = (taskInfo.ms || 0) + invokeMs;
+
+        // 记录 sendValue
+        taskInfo.sendValue = resolvedValue;
+
+        if (isDone) {
+          taskInfo.stage = 'done';
+          this.emitAll(new DoneEvent(null, resolvedValue, taskInfo.task), [taskInfo.task]);
+        } else {
+          this.callback && this.callback(resolvedValue);
+          this.emitAll(new YieldEvent(resolvedValue, taskInfo.task), [taskInfo.task]);
+        }
+      } catch (commonError) {
+        const command = getInjectValue(commonError) as IInjectCommandType;
+
+        if (command) {
+          // 退出
+          if (command.type === 'exit') break;
+
+          // 下一个循环
+          if (command.type === 'continue') continue;
+        } else {
+          this.emitAll(
+            new CrashEvent(commonError),
+            [...this.taskPool.values()].map(d => d.task)
+          );
+
+          throw commonError;
+        }
+      }
+    }
   }
 }

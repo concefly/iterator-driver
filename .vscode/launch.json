@@ -1,0 +1,12 @@
+// [VSCode 调试中 launch.json 配置不完全指南 | 小胡子哥的个人网站](https://www.barretlee.com/blog/2019/03/18/debugginginvscodetutorial/)
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to node",
+      "type": "node",
+      "request": "attach",
+      "processId": "${command:PickProcess}"
+    }
+  ]
+}

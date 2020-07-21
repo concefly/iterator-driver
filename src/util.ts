@@ -39,3 +39,20 @@ export function getUUid(prefix = '') {
 export function cond<T>(spec: { [key in ITaskStage]: (ctx: T) => void }) {
   return (key: ITaskStage, ctx: T) => spec[key](ctx);
 }
+
+const injectFlagSym = Symbol('injectFlag');
+
+export function setInjectValue<T>(target: T, value: any): T {
+  Object.defineProperty(target, injectFlagSym, {
+    value,
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
+
+  return target;
+}
+
+export function getInjectValue(target: any) {
+  return target[injectFlagSym];
+}

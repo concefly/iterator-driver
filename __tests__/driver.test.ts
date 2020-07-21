@@ -87,9 +87,15 @@ describe('__tests__/driver.test.ts', () => {
     };
 
     const t1 = new BaseTask({ iter: i1 })
-      .on(StartEvent, () => t1Flag.Start++)
-      .on(YieldEvent, () => t1Flag.Yield++)
-      .on(DoneEvent, () => t1Flag.Done++);
+      .on(StartEvent, () => {
+        t1Flag.Start++;
+      })
+      .on(YieldEvent, () => {
+        t1Flag.Yield++;
+      })
+      .on(DoneEvent, () => {
+        t1Flag.Done++;
+      });
 
     const d = new TaskDriver([t1], new TimeoutScheduler());
 
@@ -189,7 +195,11 @@ describe('__tests__/driver.test.ts', () => {
 
   it('shouldTaskRun test', done => {
     class TestTaskDriver extends TaskDriver {
+      private cnt = 10;
+
       shouldTaskRun(task: BaseTask) {
+        if (this.cnt-- === 0) d.dispose();
+
         if (task.name === 'skip') return false;
         else return true;
       }
@@ -227,7 +237,7 @@ describe('__tests__/driver.test.ts', () => {
 
     const d = new TestTaskDriver([t1, t2], new TimeoutScheduler());
 
-    d.on(EmptyEvent, () => {
+    d.on(DisposeEvent, () => {
       expect(flag).toEqual(['i1', 'i1', 'i1']);
       done();
     }).start();
