@@ -8,19 +8,31 @@ import {
   ResumeEvent,
   DropEvent,
   EmptyEvent,
-  DisposeEvent,
+  StopEvent,
   CrashEvent,
 } from './event';
 import { BaseTask } from './task';
 import { BaseScheduler } from './scheduler';
 import { runtimeMs, toPromise, cond, noop, setInjectValue, getInjectValue } from './util';
 
-export type IDriverState = 'init' | 'running' | 'paused' | 'error' | 'done';
-export type ITaskStage = 'init' | 'running' | 'error' | 'dropped' | 'done';
+export enum DriverStateEnum {
+  stop = 'stop',
+  running = 'running',
+  paused = 'paused',
+  error = 'error',
+}
+
+export enum TaskStageEnum {
+  init = 'init',
+  running = 'running',
+  error = 'error',
+  dropped = 'dropped',
+  done = 'done',
+}
 
 export type ITaskData<T> = {
   task: T;
-  stage: ITaskStage;
+  stage: TaskStageEnum;
 
   /** 运行 ms 数 */
   ms?: number;
@@ -40,7 +52,7 @@ type IInjectCommandType =
 export class TaskDriver<T extends BaseTask = BaseTask> {
   protected taskPool = new Map<string, ITaskData<T>>();
   protected eventBus = new EventBus();
-  protected state: IDriverState = 'init';
+  protected state: DriverStateEnum = DriverStateEnum.stop;
   protected injectCommands: IInjectCommandType[] = [];
 
   constructor(
@@ -58,7 +70,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
         task.name,
         {
           task,
-          stage: 'init',
+          stage: TaskStageEnum.init,
         } as ITaskData<T>,
       ])
     );
@@ -131,24 +143,24 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   pause() {
-    this.state = 'paused';
+    this.state = DriverStateEnum.paused;
     this.emitAll(new PauseEvent());
     return this;
   }
 
   resume() {
-    this.state = 'running';
+    this.state = DriverStateEnum.running;
     this.emitAll(new ResumeEvent());
     return this;
   }
 
   drop(tasks: T[]) {
     const stageHandler = cond<{ taskData: ITaskData<T> }>({
-      init: ctx => (ctx.taskData.stage = 'dropped'),
+      init: ctx => (ctx.taskData.stage = TaskStageEnum.dropped),
       running: ctx => {
         // 卸载正在执行中的任务，要废弃掉当前这个循环
         this.injectCommands.unshift({ type: 'continue' });
-        ctx.taskData.stage = 'dropped';
+        ctx.taskData.stage = TaskStageEnum.dropped;
       },
       error: noop,
       dropped: noop,
@@ -178,24 +190,37 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   /**
-   * 销毁
+   * 停止
    * - 清理各种定时器
    * - 重置状态
    */
-  dispose() {
+  stop() {
     // 卸掉所有任务
     this.dropAll();
 
     // 清除任务池
     this.taskPool.clear();
-    this.state = 'init';
 
-    // 设置退出循环
-    this.injectCommands = [{ type: 'exit' }];
+    if (this.state === DriverStateEnum.running) {
+      // 设置退出循环
+      this.injectCommands = [{ type: 'exit' }];
+    } else {
+      // 否则可以直接 emit stop
+      this.state = DriverStateEnum.stop;
+      this.emitAll(new StopEvent());
+    }
 
-    // 先发一个事件，然后把事件总线关掉
-    this.emitAll(new DisposeEvent(), []);
+    return this;
+  }
+
+  /**
+   * 销毁
+   * - stop & 清空事件监听
+   */
+  dispose() {
+    this.stop();
     this.eventBus.off();
+    return this;
   }
 
   addTask(task: T, opt?: { overwrite: boolean }) {
@@ -205,10 +230,10 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
 
     this.taskPool.set(task.name, {
       task,
-      stage: 'init',
+      stage: TaskStageEnum.init,
     });
 
-    if (this.config?.autoStart) this.start();
+    if (this.config?.autoStart && this.state !== DriverStateEnum.running) this.start();
 
     return this;
   }
@@ -232,9 +257,18 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     return this;
   }
 
+  once<E extends typeof BaseEvent>(type: E, h: (event: InstanceType<E>) => void) {
+    this.eventBus.once(type, h);
+    return this;
+  }
+
+  getState(): DriverStateEnum {
+    return this.state;
+  }
+
   protected async doLoop() {
     if (this.state === 'running') return;
-    this.state = 'running';
+    this.state = DriverStateEnum.running;
 
     const waitPromise = async <T>(value: Promise<T>): Promise<T> => {
       const result = await value;
@@ -260,14 +294,12 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
 
     const exit = (err?: Error) => {
       if (err) {
-        this.state = 'error';
+        this.state = DriverStateEnum.error;
 
-        this.emitAll(
-          new CrashEvent(err),
-          [...this.taskPool.values()].map(d => d.task)
-        );
+        this.emitAll(new CrashEvent(err));
       } else {
-        this.state = 'done';
+        this.state = DriverStateEnum.stop;
+        this.emitAll(new StopEvent());
       }
     };
 
@@ -297,7 +329,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
           const taskInfo = this.pickTaskData(shouldRunTaskInfos);
           if (!taskInfo) continue;
 
-          taskInfo.stage = 'running';
+          taskInfo.stage = TaskStageEnum.running;
           const { sendValue } = taskInfo;
 
           // 求值
@@ -316,7 +348,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
             if (getInjectValue(taskError)) throw taskError;
 
             // 否则抛事件，并继续调度
-            taskInfo.stage = 'error';
+            taskInfo.stage = TaskStageEnum.error;
             taskInfo.error = taskError;
 
             this.emitAll(new DoneEvent(taskError, undefined, taskInfo.task), [taskInfo.task]);
@@ -330,7 +362,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
           taskInfo.sendValue = resolvedValue;
 
           if (isDone) {
-            taskInfo.stage = 'done';
+            taskInfo.stage = TaskStageEnum.done;
             this.emitAll(new DoneEvent(null, resolvedValue, taskInfo.task), [taskInfo.task]);
           } else {
             this.callback && this.callback(resolvedValue);

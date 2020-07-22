@@ -7,7 +7,7 @@ import {
   StartEvent,
   YieldEvent,
   DropEvent,
-  DisposeEvent,
+  StopEvent,
 } from '../src';
 
 describe('__tests__/driver.test.ts', () => {
@@ -63,10 +63,10 @@ describe('__tests__/driver.test.ts', () => {
       })
       .on(EmptyEvent, () => {
         flag.push('EmptyEvent');
-        driver.dispose();
+        driver.stop();
       })
-      .on(DisposeEvent, () => {
-        flag.push(`DisposeEvent`);
+      .on(StopEvent, () => {
+        flag.push(`StopEvent`);
         expect(flag).toMatchSnapshot();
         done();
       })
@@ -198,7 +198,7 @@ describe('__tests__/driver.test.ts', () => {
       private cnt = 10;
 
       shouldTaskRun(task: BaseTask) {
-        if (this.cnt-- === 0) d.dispose();
+        if (this.cnt-- === 0) d.stop();
 
         if (task.name === 'skip') return false;
         else return true;
@@ -237,7 +237,7 @@ describe('__tests__/driver.test.ts', () => {
 
     const d = new TestTaskDriver([t1, t2], new TimeoutScheduler());
 
-    d.on(DisposeEvent, () => {
+    d.on(StopEvent, () => {
       expect(flag).toEqual(['i1', 'i1', 'i1']);
       done();
     }).start();

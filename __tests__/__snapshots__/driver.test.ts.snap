@@ -11,6 +11,6 @@ Array [
   "DropEvent-BaseTask-2",
   "EmptyEvent",
   "DropEvent-",
-  "DisposeEvent",
+  "StopEvent",
 ]
 `;

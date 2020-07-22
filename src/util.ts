@@ -1,4 +1,4 @@
-import { ITaskStage } from './driver';
+import { TaskStageEnum } from './driver';
 
 export const noop = () => {};
 
@@ -36,8 +36,8 @@ export function getUUid(prefix = '') {
   return `${prefix}${uuid++}`;
 }
 
-export function cond<T>(spec: { [key in ITaskStage]: (ctx: T) => void }) {
-  return (key: ITaskStage, ctx: T) => spec[key](ctx);
+export function cond<T>(spec: { [key in TaskStageEnum]: (ctx: T) => void }) {
+  return (key: TaskStageEnum, ctx: T) => spec[key](ctx);
 }
 
 const injectFlagSym = Symbol('injectFlag');

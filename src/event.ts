@@ -53,9 +53,9 @@ export class ResumeEvent extends BaseEvent {
   static displayName = 'Resume';
 }
 
-/** 销毁 */
-export class DisposeEvent extends BaseEvent {
-  static displayName = 'dispose';
+/** 停止 */
+export class StopEvent extends BaseEvent {
+  static displayName = 'stop';
 }
 
 /** 崩溃 */
@@ -68,17 +68,33 @@ export class CrashEvent extends BaseEvent {
 }
 
 export class EventBus {
-  private handleMap = new Map<BaseEvent, Function[]>();
+  private handleMap = new Map<
+    BaseEvent,
+    Array<{
+      handler: Function;
+      once?: boolean;
+    }>
+  >();
 
   emit<T extends BaseEvent>(event: T) {
     const handlers = this.handleMap.get(event.constructor) || [];
-    handlers.forEach(h => h(event));
+    const newHandlers = handlers.filter(h => {
+      h.handler(event);
+      return h.once ? false : true;
+    });
+
+    this.handleMap.set(event.constructor, newHandlers);
 
     return this;
   }
 
+  once<T extends typeof BaseEvent>(type: T, handler: (event: InstanceType<T>) => void) {
+    this.handleMap.set(type, [...(this.handleMap.get(type) || []), { handler, once: true }]);
+    return this;
+  }
+
   on<T extends typeof BaseEvent>(type: T, handler: (event: InstanceType<T>) => void) {
-    this.handleMap.set(type, [...(this.handleMap.get(type) || []), handler]);
+    this.handleMap.set(type, [...(this.handleMap.get(type) || []), { handler }]);
     return this;
   }
 
@@ -87,7 +103,7 @@ export class EventBus {
     if (type && handler) {
       this.handleMap.set(
         type,
-        [...(this.handleMap.get(type) || [])].filter(_h => _h !== handler)
+        [...(this.handleMap.get(type) || [])].filter(_h => _h.handler !== handler)
       );
       return this;
     }
