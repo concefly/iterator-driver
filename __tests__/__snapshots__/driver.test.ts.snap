@@ -10,7 +10,6 @@ Array [
   "YieldEvent-2.2",
   "DropEvent-BaseTask-2",
   "EmptyEvent",
-  "DropEvent-",
   "StopEvent",
 ]
 `;

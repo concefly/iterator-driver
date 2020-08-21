@@ -36,7 +36,7 @@ export function getUUid(prefix = '') {
   return `${prefix}${uuid++}`;
 }
 
-export function cond<T>(spec: { [key in TaskStageEnum]: (ctx: T) => void }) {
+export function cond<T>(spec: { [key in TaskStageEnum]: (ctx: T) => any }) {
   return (key: TaskStageEnum, ctx: T) => spec[key](ctx);
 }
 
