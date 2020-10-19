@@ -10,26 +10,14 @@ import {
   EmptyEvent,
   StopEvent,
   CrashEvent,
+  TaskStageChangeEvent,
 } from './event';
 import { BaseTask } from './task';
 import { BaseScheduler } from './scheduler';
 import { runtimeMs, toPromise, cond, noop, setInjectValue, getInjectValue } from './util';
+import { DriverStateEnum, TaskStageEnum } from './enum';
 
-export enum DriverStateEnum {
-  stop = 'stop',
-  running = 'running',
-  paused = 'paused',
-  error = 'error',
-}
-
-export enum TaskStageEnum {
-  init = 'init',
-  running = 'running',
-  error = 'error',
-  dropped = 'dropped',
-  done = 'done',
-}
-
+/** @deprecated */
 export type ITaskData<T> = {
   task: T;
   stage: TaskStageEnum;
@@ -49,13 +37,12 @@ type IInjectCommandItem = { command: CommandEnum; onEnd?(): void };
 
 /** 创建切片任务驱动器 */
 export class TaskDriver<T extends BaseTask = BaseTask> {
-  protected taskPool = new Map<string, ITaskData<T>>();
   protected eventBus = new EventBus();
   protected state: DriverStateEnum = DriverStateEnum.stop;
   protected injectCommands: IInjectCommandItem[] = [];
 
   constructor(
-    tasks: T[],
+    protected readonly tasks: T[],
     protected readonly scheduler: BaseScheduler,
     protected readonly callback?: (value: T) => void,
     protected readonly config?: {
@@ -63,23 +50,9 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
       autoStart?: boolean;
       autoOverwrite?: boolean;
     }
-  ) {
-    // 初始化任务池
-    this.taskPool = new Map(
-      tasks.map(task => [
-        task.name,
-        {
-          task,
-          stage: TaskStageEnum.init,
-        } as ITaskData<T>,
-      ])
-    );
-  }
+  ) {}
 
-  protected emitAll<E extends BaseEvent>(
-    event: E,
-    tasks: T[] = [...this.taskPool.values()].map(d => d.task)
-  ) {
+  protected emitAll<E extends BaseEvent>(event: E, tasks: T[] = this.tasks) {
     // 给自己 emit
     this.eventBus.emit(event);
     // 给 task emit
@@ -88,17 +61,26 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     }
   }
 
+  protected changeTaskStage(task: T, newStage: TaskStageEnum) {
+    if (task.stage === newStage) return;
+
+    const lastStage = task.stage;
+    task.stage = newStage;
+
+    this.emitAll(new TaskStageChangeEvent(task, { lastStage }));
+  }
+
   /** @override 自定义选取 task */
-  protected pickTask(tasks: ITaskData<T>[]): T | undefined {
+  protected pickTask(tasks: T[]): T | undefined {
     if (tasks.length === 0) return;
 
     // 优先级大的排后面
     tasks.sort((a, b) => {
       return (
         // 优先级排序
-        a.task.priority - b.task.priority ||
+        a.priority - b.priority ||
         // 次优先级排序
-        a.task.minorPriority - b.task.minorPriority ||
+        a.minorPriority - b.minorPriority ||
         // 运行时间排序
         (() => {
           const aMs = a.ms || 0;
@@ -109,7 +91,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
       );
     });
 
-    return tasks.pop()?.task;
+    return tasks.pop();
   }
 
   /** @override 自定义判断任务是否执行 */
@@ -117,22 +99,11 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     return true;
   }
 
-  protected pickTaskData(taskDataList: ITaskData<T>[]): ITaskData<T> | undefined {
-    taskDataList = taskDataList.filter(t => this.shouldTaskRun(t.task));
-
-    const taskName = this.pickTask(taskDataList)?.name;
-    return taskName ? this.taskPool.get(taskName) : undefined;
-  }
-
   /**
    * @override 判断是否要进行此次调度
    */
   protected shouldRunCallLoop(): boolean {
     return true;
-  }
-
-  protected getUnFinishTaskPoolItem(): ITaskData<T>[] {
-    return [...this.taskPool.values()].filter(d => d.stage === 'init' || d.stage === 'running');
   }
 
   async start() {
@@ -155,16 +126,16 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
   }
 
   async drop(tasks: T[]) {
-    const stageHandler = cond<{ taskData: ITaskData<T> }>({
-      init: ctx => (ctx.taskData.stage = TaskStageEnum.dropped),
+    const stageHandler = cond<{ task: T }>({
+      init: ctx => this.changeTaskStage(ctx.task, TaskStageEnum.dropped),
       running: ctx => {
         // 卸载正在执行中的任务，要废弃掉当前这个循环
         return new Promise(resolve => {
           this.injectCommands.unshift({
             command: CommandEnum.continue,
             onEnd: () => {
-              ctx.taskData.stage = TaskStageEnum.dropped;
-              this.emitAll(new DropEvent([ctx.taskData.task]), [ctx.taskData.task]);
+              this.changeTaskStage(ctx.task, TaskStageEnum.dropped);
+              this.emitAll(new DropEvent([ctx.task]), [ctx.task]);
               resolve();
             },
           });
@@ -173,16 +144,13 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
       error: noop,
       dropped: noop,
       done: ctx => {
-        ctx.taskData.task.iter.return?.();
+        ctx.task.iter.return?.();
       },
     });
 
     // 结束任务
-    for (const { name } of tasks) {
-      const taskData = this.taskPool.get(name);
-      if (!taskData) return;
-
-      await stageHandler(taskData.stage, { taskData });
+    for (const task of tasks) {
+      await stageHandler(task.stage, { task });
     }
 
     return this;
@@ -205,7 +173,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
     await this.dropAll();
 
     // 清除任务池
-    this.taskPool.clear();
+    this.tasks.length = 0;
 
     if (this.state === DriverStateEnum.running) {
       // 设置退出循环
@@ -241,22 +209,20 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
 
   addTask(task: T) {
     if (!this.config?.autoOverwrite) {
-      if (this.taskPool.has(task.name)) throw new Error('当前任务已存在 ' + task.name);
+      if (this.tasks.some(t => t.name === task.name)) {
+        throw new Error('当前任务已存在 ' + task.name);
+      }
     }
 
-    this.taskPool.set(task.name, {
-      task,
-      stage: TaskStageEnum.init,
-    });
+    this.tasks.push(task);
 
     if (this.config?.autoStart && this.state !== DriverStateEnum.running) this.start();
-
     return this;
   }
 
   /** 获取未完成的任务队列 */
   getUnFinishTaskQueue(): T[] {
-    return this.getUnFinishTaskPoolItem().map(d => d.task);
+    return this.tasks.filter(d => d.stage === 'init' || d.stage === 'running');
   }
 
   get isRunning(): boolean {
@@ -304,10 +270,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
       );
 
     // 开始事件
-    this.emitAll(
-      new StartEvent(),
-      [...this.taskPool.values()].map(d => d.task)
-    );
+    this.emitAll(new StartEvent(), this.tasks);
 
     const exit = (err?: Error) => {
       if (err) {
@@ -327,8 +290,8 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
           // 每个循环开始都要等待调度
           await waitSchedule();
 
-          const taskInfos = this.getUnFinishTaskPoolItem();
-          if (taskInfos.length === 0) {
+          const unfinishedTasks = this.getUnFinishTaskQueue();
+          if (unfinishedTasks.length === 0) {
             this.emitAll(new EmptyEvent(), []);
             break;
           }
@@ -340,15 +303,18 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
           // 自定义检查
           if (!this.shouldRunCallLoop()) continue;
 
-          const shouldRunTaskInfos = taskInfos.filter(d => this.shouldTaskRun(d.task));
-          if (shouldRunTaskInfos.length === 0) continue;
+          const shouldRunTasks = unfinishedTasks.filter(d => this.shouldTaskRun(d));
+          if (shouldRunTasks.length === 0) continue;
 
           // 优先级排序
-          const taskInfo = this.pickTaskData(shouldRunTaskInfos);
-          if (!taskInfo) continue;
+          const toRunTask = this.pickTask(shouldRunTasks);
 
-          taskInfo.stage = TaskStageEnum.running;
-          const { sendValue } = taskInfo;
+          if (!toRunTask) continue;
+
+          // 变更 task stage
+          this.changeTaskStage(toRunTask, TaskStageEnum.running);
+
+          const { sendValue } = toRunTask;
 
           // 求值
           let resolvedValue: any;
@@ -356,7 +322,7 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
           let invokeMs = 0;
 
           try {
-            const [{ value, done }, ms] = runtimeMs(() => taskInfo.task.iter.next(sendValue));
+            const [{ value, done }, ms] = runtimeMs(() => toRunTask.iter.next(sendValue));
             invokeMs = ms;
             isDone = !!done;
 
@@ -366,25 +332,25 @@ export class TaskDriver<T extends BaseTask = BaseTask> {
             if (getInjectValue(taskError)) throw taskError;
 
             // 否则抛事件，并继续调度
-            taskInfo.stage = TaskStageEnum.error;
-            taskInfo.error = taskError;
+            toRunTask.error = taskError;
+            this.changeTaskStage(toRunTask, TaskStageEnum.error);
 
-            this.emitAll(new DoneEvent(taskError, undefined, taskInfo.task), [taskInfo.task]);
+            this.emitAll(new DoneEvent(taskError, undefined, toRunTask), [toRunTask]);
             continue;
           }
 
           // 累加运行时间
-          taskInfo.ms = (taskInfo.ms || 0) + invokeMs;
+          toRunTask.ms = (toRunTask.ms || 0) + invokeMs;
 
           // 记录 sendValue
-          taskInfo.sendValue = resolvedValue;
+          toRunTask.sendValue = resolvedValue;
 
           if (isDone) {
-            taskInfo.stage = TaskStageEnum.done;
-            this.emitAll(new DoneEvent(null, resolvedValue, taskInfo.task), [taskInfo.task]);
+            this.changeTaskStage(toRunTask, TaskStageEnum.done);
+            this.emitAll(new DoneEvent(null, resolvedValue, toRunTask), [toRunTask]);
           } else {
             this.callback && this.callback(resolvedValue);
-            this.emitAll(new YieldEvent(resolvedValue, taskInfo.task), [taskInfo.task]);
+            this.emitAll(new YieldEvent(resolvedValue, toRunTask), [toRunTask]);
           }
         } catch (commonError) {
           const commandItem = getInjectValue(commonError) as IInjectCommandItem;

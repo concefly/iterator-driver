@@ -3,11 +3,15 @@
 exports[`__tests__/driver.test.ts driver 事件流 1`] = `
 Array [
   "StartEvent",
+  "TaskStageChangeEvent-BaseTask-1:init->running",
   "YieldEvent-1.1",
   "YieldEvent-1.2",
+  "TaskStageChangeEvent-BaseTask-1:running->done",
   "DoneEvent-1.3-null",
+  "TaskStageChangeEvent-BaseTask-2:init->running",
   "YieldEvent-2.1",
   "YieldEvent-2.2",
+  "TaskStageChangeEvent-BaseTask-2:running->dropped",
   "DropEvent-BaseTask-2",
   "EmptyEvent",
   "StopEvent",

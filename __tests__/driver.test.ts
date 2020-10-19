@@ -8,6 +8,7 @@ import {
   YieldEvent,
   DropEvent,
   StopEvent,
+  TaskStageChangeEvent,
 } from '../src';
 
 describe('__tests__/driver.test.ts', () => {
@@ -61,6 +62,9 @@ describe('__tests__/driver.test.ts', () => {
       .on(DropEvent, e => {
         flag.push(`DropEvent-${e.tasks.map(t => t.name).join(',')}`);
       })
+      .on(TaskStageChangeEvent, e =>
+        flag.push(`TaskStageChangeEvent-${e.task.name}:${e.extra.lastStage}->${e.task.stage}`)
+      )
       .on(EmptyEvent, () => {
         flag.push('EmptyEvent');
         driver.stop();

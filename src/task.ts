@@ -1,3 +1,4 @@
+import { TaskStageEnum } from './enum';
 import { EventBus, BaseEvent } from './event';
 import { getUUid } from './util';
 
@@ -9,6 +10,15 @@ type ITaskInitProps<T> = {
 
 export class BaseTask<T = any> {
   eventBus = new EventBus();
+
+  // 初始化 task 状态
+  stage = TaskStageEnum.init;
+
+  /** 运行 ms 数 */
+  ms?: number;
+  sendValue?: any;
+  error?: Error;
+
   constructor(
     private readonly data: ITaskInitProps<T>,
     readonly name: string = getUUid('BaseTask-')

@@ -1,3 +1,4 @@
+import { TaskStageEnum } from './enum';
 import { BaseTask } from './task';
 
 export class BaseEvent {
@@ -21,7 +22,7 @@ export class YieldEvent extends BaseEvent {
   }
 }
 
-/** 某个 iterator 结束 */
+/** @deprecated 用 TaskStageChangeEvent 替代 */
 export class DoneEvent extends BaseEvent {
   static displayName = 'Done';
   constructor(public error: Error | null, public value: any, public readonly task: BaseTask<any>) {
@@ -34,7 +35,7 @@ export class EmptyEvent extends BaseEvent {
   static displayName = 'Empty';
 }
 
-/** 卸载任务 */
+/** @deprecated 用 TaskStageChangeEvent 替代 */
 export class DropEvent extends BaseEvent {
   static displayName = 'drop';
 
@@ -63,6 +64,14 @@ export class CrashEvent extends BaseEvent {
   static displayName = 'CrashEvent';
 
   constructor(public readonly error: Error) {
+    super();
+  }
+}
+
+/** 任务 stage 变化 */
+export class TaskStageChangeEvent extends BaseEvent {
+  static displayName = 'TaskStageChangeEvent';
+  constructor(public readonly task: BaseTask, public readonly extra: { lastStage: TaskStageEnum }) {
     super();
   }
 }
