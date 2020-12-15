@@ -1,5 +1,4 @@
 import { TaskStageEnum } from './enum';
-import { EventBus, BaseEvent } from './event';
 import { getUUid } from './util';
 
 type ITaskInitProps<T> = {
@@ -9,48 +8,36 @@ type ITaskInitProps<T> = {
 };
 
 export class BaseTask<T = any> {
-  eventBus = new EventBus();
-
   // 初始化 task 状态
-  stage = TaskStageEnum.init;
+  public stage = TaskStageEnum.init;
 
   /** 运行 ms 数 */
-  ms?: number;
-  sendValue?: any;
-  error?: Error;
+  public ms?: number;
+  public sendValue?: any;
+  public error?: Error;
 
   constructor(
     private readonly data: ITaskInitProps<T>,
     readonly name: string = getUUid('BaseTask-')
   ) {}
 
-  get iter() {
+  public get iter() {
     return this.data.iter;
   }
 
-  get priority() {
+  public get priority() {
     return this.data.priority || 0;
   }
 
-  set priority(p: number) {
+  public set priority(p: number) {
     this.data.priority = p;
   }
 
-  get minorPriority() {
+  public get minorPriority() {
     return this.data.minorPriority || 0;
   }
 
-  set minorPriority(p: number) {
+  public set minorPriority(p: number) {
     this.data.minorPriority = p;
-  }
-
-  on<T extends typeof BaseEvent>(type: T, h: (event: InstanceType<T>) => void) {
-    this.eventBus.on(type, h);
-    return this;
-  }
-
-  off<T extends typeof BaseEvent>(type?: T, h?: Function) {
-    this.eventBus.off(type, h);
-    return this;
   }
 }

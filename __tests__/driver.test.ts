@@ -1,14 +1,11 @@
 import {
   TaskDriver,
   TimeoutScheduler,
-  DoneEvent,
-  EmptyEvent,
   BaseTask,
-  StartEvent,
   YieldEvent,
-  DropEvent,
-  StopEvent,
   TaskStageChangeEvent,
+  DriverStageChangeEvent,
+  DriverStageEnum,
 } from '../src';
 
 describe('__tests__/driver.test.ts', () => {
@@ -24,11 +21,13 @@ describe('__tests__/driver.test.ts', () => {
 
     let startFlag = 0;
 
-    d.on(StartEvent, () => {
-      startFlag++;
-    }).on(EmptyEvent, () => {
-      expect(startFlag).toBe(1);
-      done();
+    d.eventBus.on(DriverStageChangeEvent, ev => {
+      if (ev.stage === DriverStageEnum.running) {
+        startFlag++;
+      } else if (ev.stage === DriverStageEnum.done) {
+        expect(startFlag).toBe(1);
+        done();
+      }
     });
 
     d.start();
@@ -52,65 +51,26 @@ describe('__tests__/driver.test.ts', () => {
 
     let flag: string[] = [];
 
-    driver
-      .on(StartEvent, () => flag.push('StartEvent'))
+    driver.eventBus
+      .on(DriverStageChangeEvent, ev => {
+        flag.push(`DriverStageChangeEvent-${ev.extra.lastStage}->${ev.stage}`);
+
+        if (ev.isDone()) {
+          expect(flag).toMatchSnapshot();
+          done();
+        }
+      })
+      .on(TaskStageChangeEvent, ev => {
+        flag.push(
+          `TaskStageChangeEvent-${ev.extra.task.name}-${ev.extra.lastStage}->${ev.extra.task.stage}`
+        );
+      })
       .on(YieldEvent, e => {
         flag.push(`YieldEvent-${e.value}`);
         if (e.value === '2.2') driver.drop([t2]);
-      })
-      .on(DoneEvent, e => flag.push(`DoneEvent-${e.value}-${e.error}`))
-      .on(DropEvent, e => {
-        flag.push(`DropEvent-${e.tasks.map(t => t.name).join(',')}`);
-      })
-      .on(TaskStageChangeEvent, e =>
-        flag.push(`TaskStageChangeEvent-${e.task.name}:${e.extra.lastStage}->${e.task.stage}`)
-      )
-      .on(EmptyEvent, () => {
-        flag.push('EmptyEvent');
-        driver.stop();
-      })
-      .on(StopEvent, () => {
-        flag.push(`StopEvent`);
-        expect(flag).toMatchSnapshot();
-        done();
-      })
-      .start();
-  });
-
-  it('task 事件流', done => {
-    const i1 = (function* () {
-      yield '1.1';
-      yield '1.2';
-      return '1.3';
-    })();
-
-    const t1Flag = {
-      Start: 0,
-      Yield: 0,
-      Done: 0,
-    };
-
-    const t1 = new BaseTask({ iter: i1 })
-      .on(StartEvent, () => {
-        t1Flag.Start++;
-      })
-      .on(YieldEvent, () => {
-        t1Flag.Yield++;
-      })
-      .on(DoneEvent, () => {
-        t1Flag.Done++;
       });
 
-    const d = new TaskDriver([t1], new TimeoutScheduler());
-
-    d.on(EmptyEvent, () => {
-      expect(t1Flag).toEqual({
-        Start: 1,
-        Yield: 2,
-        Done: 1,
-      });
-      done();
-    }).start();
+    driver.start();
   });
 
   it('可以 yield 各种值', done => {
@@ -135,7 +95,11 @@ describe('__tests__/driver.test.ts', () => {
       cnt === 6 && expect(value).toEqual({ c: 'c' });
     });
 
-    d.on(EmptyEvent, () => done()).start();
+    d.eventBus.on(DriverStageChangeEvent, ev => {
+      if (ev.isDone()) done();
+    });
+
+    d.start();
   });
 
   it('yield 可以拿到 send 的值', done => {
@@ -164,7 +128,11 @@ describe('__tests__/driver.test.ts', () => {
 
     const d = new TaskDriver([t1, t2], new TimeoutScheduler());
 
-    d.on(EmptyEvent, () => done()).start();
+    d.eventBus.on(DriverStageChangeEvent, ev => {
+      if (ev.isDone()) done();
+    });
+
+    d.start();
   });
 
   it('yield 可以 catch', done => {
@@ -178,7 +146,12 @@ describe('__tests__/driver.test.ts', () => {
     const t1 = new BaseTask({ iter: i1 });
 
     const d = new TaskDriver([t1], new TimeoutScheduler(), () => {});
-    d.on(EmptyEvent, () => done()).start();
+
+    d.eventBus.on(DriverStageChangeEvent, ev => {
+      if (ev.isDone()) done();
+    });
+
+    d.start();
   });
 
   it('.start() 之后等待调度再开始任务', done => {
@@ -191,7 +164,11 @@ describe('__tests__/driver.test.ts', () => {
     const t1 = new BaseTask({ iter: i1 });
     const d = new TaskDriver([t1], new TimeoutScheduler());
 
-    d.on(DoneEvent, () => done()).start();
+    d.eventBus.on(TaskStageChangeEvent, ev => {
+      if (ev.isDone()) done();
+    });
+
+    d.start();
 
     // .start() 之后，flag 依然是 `init`，表示没有执行过 i1
     expect(flag).toBe('init');
@@ -241,10 +218,14 @@ describe('__tests__/driver.test.ts', () => {
 
     const d = new TestTaskDriver([t1, t2], new TimeoutScheduler());
 
-    d.on(StopEvent, () => {
-      expect(flag).toEqual(['i1', 'i1', 'i1']);
-      done();
-    }).start();
+    d.eventBus.on(DriverStageChangeEvent, ev => {
+      if (ev.isDone()) {
+        expect(flag).toEqual(['i1', 'i1', 'i1']);
+        done();
+      }
+    });
+
+    d.start();
   });
 
   describe('优先级任务', () => {
@@ -269,8 +250,8 @@ describe('__tests__/driver.test.ts', () => {
         cnt--;
       });
 
-      d.on(EmptyEvent, () => {
-        done();
+      d.eventBus.on(TaskStageChangeEvent, ev => {
+        if (ev.isDone()) done();
       });
 
       d.start();
@@ -302,8 +283,8 @@ describe('__tests__/driver.test.ts', () => {
         if (cnt === 5) throw new Error();
       });
 
-      d.on(EmptyEvent, () => {
-        done();
+      d.eventBus.on(TaskStageChangeEvent, ev => {
+        if (ev.isDone()) done();
       });
 
       d.start();
@@ -334,8 +315,8 @@ describe('__tests__/driver.test.ts', () => {
         cnt === 4 && expect(value).toBe('i2.2');
       });
 
-      d.on(EmptyEvent, () => {
-        done();
+      d.eventBus.on(TaskStageChangeEvent, ev => {
+        if (ev.isDone()) done();
       });
 
       d.start();
@@ -345,7 +326,7 @@ describe('__tests__/driver.test.ts', () => {
   describe('错误堆栈还原', () => {
     it('同步栈 & 异步栈', done => {
       const invokeCnt = { i1: 0, i2: 0, i3: 0 };
-      const invokeErrorEvents: DoneEvent[] = [];
+      const invokeErrorEvents: { name: string; message: string }[] = [];
 
       // 同步栈
       const i1 = (function* () {
@@ -372,24 +353,32 @@ describe('__tests__/driver.test.ts', () => {
       const t2 = new BaseTask<any>({ iter: i2 });
       const t3 = new BaseTask<any>({ iter: i3 });
 
-      new TaskDriver([t1, t2, t3], new TimeoutScheduler())
-        .on(DoneEvent, e => {
-          if (e.error) {
-            invokeErrorEvents.push(e);
+      const d = new TaskDriver([t1, t2, t3], new TimeoutScheduler());
+
+      d.eventBus
+        .on(DriverStageChangeEvent, ev => {
+          if (ev.isDone()) {
+            expect(invokeCnt).toStrictEqual({ i1: 1, i2: 1, i3: 2 });
+
+            expect(invokeErrorEvents[0].message).toContain('fake error1');
+            expect(invokeErrorEvents[0].name).toBe(t1.name);
+
+            expect(invokeErrorEvents[1].message).toContain('fake error2');
+            expect(invokeErrorEvents[1].name).toBe(t2.name);
+
+            done();
           }
         })
-        .on(EmptyEvent, () => {
-          expect(invokeCnt).toStrictEqual({ i1: 1, i2: 1, i3: 2 });
+        .on(TaskStageChangeEvent, ev => {
+          if (ev.isError()) {
+            invokeErrorEvents.push({
+              name: ev.extra.task.name,
+              message: ev.extra.task.error!.message,
+            });
+          }
+        });
 
-          expect(invokeErrorEvents[0].error?.message).toContain('fake error1');
-          expect(invokeErrorEvents[0].task.name).toBe(t1.name);
-
-          expect(invokeErrorEvents[1].error?.message).toContain('fake error2');
-          expect(invokeErrorEvents[1].task.name).toBe(t2.name);
-
-          done();
-        })
-        .start();
+      d.start();
     });
   });
 
@@ -410,12 +399,22 @@ describe('__tests__/driver.test.ts', () => {
       })();
       const t2 = new BaseTask({ iter: i2, priority: 0 });
 
-      const d = new TaskDriver<BaseTask>([], new TimeoutScheduler(), undefined, { autoStart: true })
-        .on(StartEvent, () => startCnt++)
-        .on(DoneEvent, () => {
-          expect(flag).toBe('i1');
-          expect(startCnt).toBe(1);
-          done();
+      const d = new TaskDriver<BaseTask>([], new TimeoutScheduler(), undefined, {
+        autoStart: true,
+      });
+
+      d.eventBus
+        .on(DriverStageChangeEvent, ev => {
+          if (ev.isRunning()) {
+            startCnt++;
+          }
+        })
+        .on(TaskStageChangeEvent, ev => {
+          if (ev.isDone()) {
+            expect(flag).toBe('i1');
+            expect(startCnt).toBe(1);
+            done();
+          }
         });
 
       d.addTask(t1);

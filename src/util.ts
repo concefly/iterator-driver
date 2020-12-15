@@ -1,6 +1,4 @@
-import { TaskStageEnum } from './enum';
-
-export const noop = () => {};
+import { DriverStageEnum, TaskStageEnum } from './enum';
 
 export function runtimeMs<F extends (...args: any) => any>(fn: F): [ReturnType<F>, number] {
   const a = new Date();
@@ -13,7 +11,7 @@ export function runtimeMs<F extends (...args: any) => any>(fn: F): [ReturnType<F
 }
 
 /** 把任意值变成 promise */
-export function toPromise(data: any): Promise<any> {
+export async function toPromise(data: any): Promise<any> {
   // null, undefined ....
   if (!data) return Promise.resolve(data);
 
@@ -36,23 +34,15 @@ export function getUUid(prefix = '') {
   return `${prefix}${uuid++}`;
 }
 
-export function cond<T>(spec: { [key in TaskStageEnum]: (ctx: T) => any }) {
-  return (key: TaskStageEnum, ctx: T) => spec[key](ctx);
-}
-
-const injectFlagSym = Symbol('injectFlag');
-
-export function setInjectValue<T>(target: T, value: any): T {
-  Object.defineProperty(target, injectFlagSym, {
-    value,
-    writable: false,
-    enumerable: false,
-    configurable: false,
-  });
-
-  return target;
-}
-
-export function getInjectValue(target: any) {
-  return target[injectFlagSym];
+export function enumCond<S extends TaskStageEnum | DriverStageEnum, T, R>(
+  spec: { [code in S]: ((ctx: T) => R) | 'error' | 'skip' }
+) {
+  return (code: S, ctx: T) => {
+    const fn = spec[code];
+    if (fn === 'skip') {
+      // do nothing
+    }
+    if (fn === 'error') throw new Error(`状态错误 ${code}`);
+    if (typeof fn === 'function') return (fn as any)(ctx) as R;
+  };
 }

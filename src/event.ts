@@ -1,18 +1,6 @@
-import { TaskStageEnum } from './enum';
+import { DriverStageEnum, TaskStageEnum } from './enum';
 import { BaseTask } from './task';
-
-export class BaseEvent {
-  static displayName = 'BaseEvent';
-
-  constructor(...args: any[]) {
-    void args;
-  }
-}
-
-/** 开始 */
-export class StartEvent extends BaseEvent {
-  static displayName = 'Start';
-}
+import { BaseEvent } from 'ah-event-bus';
 
 /** 每个 yield 事件 */
 export class YieldEvent extends BaseEvent {
@@ -22,109 +10,48 @@ export class YieldEvent extends BaseEvent {
   }
 }
 
-/** @deprecated 用 TaskStageChangeEvent 替代 */
-export class DoneEvent extends BaseEvent {
-  static displayName = 'Done';
-  constructor(public error: Error | null, public value: any, public readonly task: BaseTask<any>) {
+/** driver stage 变化 */
+export class DriverStageChangeEvent extends BaseEvent {
+  static displayName = 'DriverStageChangeEvent';
+  constructor(
+    public readonly stage: DriverStageEnum,
+    public readonly extra: { lastStage: DriverStageEnum }
+  ) {
     super();
   }
-}
 
-/** 所有 iterator 结束 */
-export class EmptyEvent extends BaseEvent {
-  static displayName = 'Empty';
-}
-
-/** @deprecated 用 TaskStageChangeEvent 替代 */
-export class DropEvent extends BaseEvent {
-  static displayName = 'drop';
-
-  constructor(public readonly tasks: BaseTask<any>[]) {
-    super();
+  public isRunning() {
+    return this.stage === DriverStageEnum.running;
   }
-}
 
-/** 暂停 */
-export class PauseEvent extends BaseEvent {
-  static displayName = 'Pause';
-}
+  public isDone() {
+    return this.stage === DriverStageEnum.done;
+  }
 
-/** 恢复 */
-export class ResumeEvent extends BaseEvent {
-  static displayName = 'Resume';
-}
-
-/** 停止 */
-export class StopEvent extends BaseEvent {
-  static displayName = 'stop';
-}
-
-/** 崩溃 */
-export class CrashEvent extends BaseEvent {
-  static displayName = 'CrashEvent';
-
-  constructor(public readonly error: Error) {
-    super();
+  public isError() {
+    return this.stage === DriverStageEnum.error;
   }
 }
 
 /** 任务 stage 变化 */
 export class TaskStageChangeEvent extends BaseEvent {
   static displayName = 'TaskStageChangeEvent';
-  constructor(public readonly task: BaseTask, public readonly extra: { lastStage: TaskStageEnum }) {
+  constructor(
+    public readonly stage: TaskStageEnum,
+    public readonly extra: { task: BaseTask; lastStage: TaskStageEnum }
+  ) {
     super();
   }
-}
 
-export class EventBus {
-  private handleMap = new Map<
-    BaseEvent,
-    Array<{
-      handler: Function;
-      once?: boolean;
-    }>
-  >();
-
-  emit<T extends BaseEvent>(event: T) {
-    const handlers = this.handleMap.get(event.constructor) || [];
-    const newHandlers = handlers.filter(h => {
-      h.handler(event);
-      return h.once ? false : true;
-    });
-
-    this.handleMap.set(event.constructor, newHandlers);
-
-    return this;
+  public isRunning() {
+    return this.stage === TaskStageEnum.running;
   }
 
-  once<T extends typeof BaseEvent>(type: T, handler: (event: InstanceType<T>) => void) {
-    this.handleMap.set(type, [...(this.handleMap.get(type) || []), { handler, once: true }]);
-    return this;
+  public isDone() {
+    return this.stage === TaskStageEnum.done;
   }
 
-  on<T extends typeof BaseEvent>(type: T, handler: (event: InstanceType<T>) => void) {
-    this.handleMap.set(type, [...(this.handleMap.get(type) || []), { handler }]);
-    return this;
-  }
-
-  off<T extends typeof BaseEvent>(type?: T, handler?: Function) {
-    // 卸载指定 handler
-    if (type && handler) {
-      this.handleMap.set(
-        type,
-        [...(this.handleMap.get(type) || [])].filter(_h => _h.handler !== handler)
-      );
-      return this;
-    }
-
-    // 卸载指定 type 的 handler
-    if (type) {
-      this.handleMap.delete(type);
-      return this;
-    }
-
-    // 卸载所有
-    this.handleMap.clear();
-    return this;
+  public isError() {
+    return this.stage === TaskStageEnum.error;
   }
 }

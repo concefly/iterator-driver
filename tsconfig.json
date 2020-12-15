@@ -15,5 +15,5 @@
     "strict": true,
     "lib": ["es5", "es2015", "dom"]
   },
-  "exclude": ["dist"]
+  "includes": ["src", "__tests__"]
 }
