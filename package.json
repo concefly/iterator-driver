@@ -9,7 +9,8 @@
   "scripts": {
     "ci": "ah-workflow ci",
     "build": "ah-workflow build",
-    "prepublishOnly": "npm run ci && npm run build"
+    "prepublishOnly": "npm run ci && npm run build",
+    "postpublish": "PACKAGE_VERSION=$(cat package.json | grep \\\"version\\\" | head -1 | awk -F: '{ print $2 }' | sed 's/[\",]//g' | tr -d '[[:space:]]') && git tag v$PACKAGE_VERSION && git push origin --all && git push origin --tags"
   },
   "repository": {
     "type": "git",
